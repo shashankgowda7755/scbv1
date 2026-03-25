@@ -1,0 +1,28 @@
+/* Communitree Lead API Styles */
+
+* {
+  box-sizing: border-box;
+}
+
+.App {
+  min-height: 100vh;
+}
+
+/* Custom scrollbar for leads list */
+.space-y-3::-webkit-scrollbar {
+  width: 8px;
+}
+
+.space-y-3::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+.space-y-3::-webkit-scrollbar-thumb {
+  background: #10b981;
+  border-radius: 10px;
+}
+
+.space-y-3::-webkit-scrollbar-thumb:hover {
+  background: #059669;
+}
