@@ -161,6 +161,29 @@ async def submit_lead(request: SubmitRequest):
         raise HTTPException(status_code=500, detail=f"Error submitting lead: {str(e)}")
 
 
+@api_router.get("/lead/{lead_id}")
+async def get_lead_by_id(lead_id: str):
+    """
+    Get a specific lead by leadId
+    """
+    try:
+        normalized_lead_id = lead_id.strip().lower()
+        lead = await db.leads.find_one(
+            {"_id": normalized_lead_id},
+            {"_id": 0}
+        )
+        
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        
+        return {"success": True, "lead": lead}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching lead: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching lead: {str(e)}")
+
+
 @api_router.get("/leads")
 async def get_all_leads():
     """
