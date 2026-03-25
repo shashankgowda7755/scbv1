@@ -8,6 +8,10 @@ from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import Optional
 from datetime import datetime, timezone
+import gspread
+from google.oauth2.service_account import Credentials
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 
 ROOT_DIR = Path(__file__).parent
@@ -17,6 +21,100 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
+
+# Google Sheets setup
+SHEETS_ENABLED = os.getenv('GOOGLE_SHEETS_ENABLED', 'false').lower() == 'true'
+SPREADSHEET_ID = os.getenv('SPREADSHEET_ID', '')
+SHEET_NAME = os.getenv('SHEET_NAME', 'Sheet5')
+
+# Thread pool for sync operations
+executor = ThreadPoolExecutor(max_workers=3)
+
+def get_sheets_client():
+    """Initialize Google Sheets client"""
+    if not SHEETS_ENABLED:
+        return None
+    try:
+        creds_path = ROOT_DIR / 'google_credentials.json'
+        scopes = ['https://www.googleapis.com/auth/spreadsheets']
+        creds = Credentials.from_service_account_file(str(creds_path), scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e:
+        logger.error(f"Failed to initialize Google Sheets client: {str(e)}")
+        return None
+
+def sync_lead_to_sheets(lead_data):
+    """Sync a single lead to Google Sheets (runs in thread pool)"""
+    try:
+        gc = get_sheets_client()
+        if not gc:
+            logger.warning("Google Sheets sync disabled or failed to initialize")
+            return False
+        
+        sheet = gc.open_by_key(SPREADSHEET_ID).worksheet(SHEET_NAME)
+        
+        # Check if headers exist
+        try:
+            headers = sheet.row_values(1)
+            if not headers or len(headers) == 0:
+                # Create headers
+                headers = ['Lead ID', 'Email', 'Full Name', 'Phone Number', 'Company', 'Submitted At', 'Submitted By (Org)']
+                sheet.append_row(headers)
+                # Format header row
+                sheet.format('A1:G1', {
+                    'backgroundColor': {'red': 0.1, 'green': 0.48, 'blue': 0.29},
+                    'textFormat': {'bold': True, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}}
+                })
+        except Exception as header_error:
+            logger.warning(f"Header check/creation failed: {str(header_error)}")
+        
+        # Prepare row data
+        submitted_at = lead_data.get('submittedAt', '')
+        if isinstance(submitted_at, str):
+            try:
+                dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
+                submitted_at = dt.strftime('%Y-%m-%d %H:%M:%S')
+            except:
+                pass
+        
+        row = [
+            lead_data.get('leadId', ''),
+            lead_data.get('email', ''),
+            lead_data.get('fullName', ''),
+            lead_data.get('phone', ''),
+            lead_data.get('company', ''),
+            submitted_at,
+            lead_data.get('orgName', '')
+        ]
+        
+        # Check if lead exists and update, otherwise append
+        normalized_lead_id = lead_data.get('leadId', '').strip().lower()
+        
+        try:
+            # Find the row with matching lead ID (case-insensitive)
+            cell = sheet.find(normalized_lead_id, in_column=1)
+            if cell:
+                # Update existing row
+                sheet.update(f'A{cell.row}:G{cell.row}', [row])
+                logger.info(f"Updated lead {lead_data.get('leadId')} in Google Sheets (row {cell.row})")
+            else:
+                # Append new row
+                sheet.append_row(row)
+                logger.info(f"Appended lead {lead_data.get('leadId')} to Google Sheets")
+        except gspread.exceptions.CellNotFound:
+            # Lead not found, append
+            sheet.append_row(row)
+            logger.info(f"Appended lead {lead_data.get('leadId')} to Google Sheets")
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error syncing to Google Sheets: {str(e)}", exc_info=True)
+        return False
+
+async def sync_lead_to_sheets_async(lead_data):
+    """Async wrapper for Google Sheets sync"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, sync_lead_to_sheets, lead_data)
 
 # Create the main app without a prefix
 app = FastAPI()
@@ -110,6 +208,7 @@ async def submit_lead(request: SubmitRequest):
     """
     Submit a new lead or replace an existing one.
     Uses leadId as the document _id for O(1) operations.
+    Syncs to Google Sheets if enabled.
     """
     try:
         lead_data = request.data
@@ -149,6 +248,11 @@ async def submit_lead(request: SubmitRequest):
         )
         
         action = "updated" if existing_lead else "created"
+        
+        # Sync to Google Sheets in background (non-blocking)
+        if SHEETS_ENABLED:
+            asyncio.create_task(sync_lead_to_sheets_async(doc))
+            logger.info(f"Scheduled Google Sheets sync for lead {lead_data.leadId}")
         
         return SubmitResponse(
             success=True,
