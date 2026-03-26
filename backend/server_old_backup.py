@@ -2,7 +2,6 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -48,35 +47,13 @@ executor = ThreadPoolExecutor(max_workers=3)
 # Rate limiting setup
 limiter = Limiter(key_func=get_remote_address)
 
-# Create the main app
+# Create the main app without a prefix
 app = FastAPI(title="Communitree Lead API - Secured")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════
-# SECURITY MIDDLEWARE
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses"""
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        headers = SecurityHeaders.get_headers()
-        for key, value in headers.items():
-            response.headers[key] = value
-        return response
-
-# Add security headers middleware
-app.add_middleware(SecurityHeadersMiddleware)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════
-# GOOGLE SHEETS SYNC
-# ═══════════════════════════════════════════════════════════════════════════════════
 
 def get_sheets_client():
     """Initialize Google Sheets client"""
@@ -164,13 +141,19 @@ async def sync_lead_to_sheets_async(lead_data):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(executor, sync_lead_to_sheets, lead_data)
 
+# Create the main app without a prefix
+app = FastAPI()
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# MODELS WITH SECURITY VALIDATION
-# ═══════════════════════════════════════════════════════════════════════════════════
+# Create a router with the /api prefix
+api_router = APIRouter(prefix="/api")
+
+
+# ═══════════════════════════════════════════════════════════════
+# MODELS
+# ═══════════════════════════════════════════════════════════════
 
 class Lead(BaseModel):
-    """Lead model for database storage with sanitization"""
+    """Lead model for database storage"""
     model_config = ConfigDict(extra="ignore")
     
     leadId: str
@@ -180,76 +163,19 @@ class Lead(BaseModel):
     company: str
     orgName: str
     submittedAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
-    @validator('leadId')
-    def validate_lead_id(cls, v):
-        """Sanitize and validate Lead ID"""
-        try:
-            return sanitize_lead_id(v)
-        except ValueError as e:
-            raise ValueError(f"Invalid Lead ID: {str(e)}")
-    
-    @validator('email')
-    def validate_email(cls, v):
-        """Sanitize email"""
-        return v.lower().strip()
-    
-    @validator('fullName', 'company', 'orgName')
-    def sanitize_text_fields(cls, v):
-        """Sanitize text fields"""
-        return sanitize_string(v, max_length=200)
-    
-    @validator('phone')
-    def sanitize_phone(cls, v):
-        """Sanitize phone number"""
-        import re
-        sanitized = re.sub(r'[^0-9+\-() ]', '', v)
-        if len(sanitized) > 20:
-            raise ValueError("Phone number too long")
-        if len(sanitized) < 3:
-            raise ValueError("Phone number too short")
-        return sanitized
 
 class LeadCreate(BaseModel):
-    """Lead creation/update input with strict validation"""
-    leadId: str = Field(..., min_length=1, max_length=100)
+    """Lead creation/update input"""
+    leadId: str = Field(..., min_length=1, description="Unique lead identifier")
     email: EmailStr
-    fullName: str = Field(..., min_length=1, max_length=200)
-    phone: str = Field(..., min_length=3, max_length=20)
-    company: str = Field(..., min_length=1, max_length=200)
-    orgName: str = Field(..., min_length=1, max_length=200)
-    
-    @validator('leadId')
-    def validate_lead_id(cls, v):
-        try:
-            return sanitize_lead_id(v)
-        except ValueError as e:
-            raise ValueError(f"Invalid Lead ID: {str(e)}")
-    
-    @validator('fullName', 'company', 'orgName')
-    def sanitize_text_fields(cls, v):
-        return sanitize_string(v, max_length=200)
-    
-    @validator('phone')
-    def sanitize_phone(cls, v):
-        import re
-        sanitized = re.sub(r'[^0-9+\-() ]', '', v)
-        if len(sanitized) > 20:
-            raise ValueError("Phone number too long")
-        if len(sanitized) < 3:
-            raise ValueError("Phone number too short")
-        return sanitized
+    fullName: str = Field(..., min_length=1)
+    phone: str = Field(..., min_length=1)
+    company: str = Field(..., min_length=1)
+    orgName: str = Field(..., min_length=1)
 
 class CheckRequest(BaseModel):
     """Check duplicate request"""
-    leadId: str = Field(..., min_length=1, max_length=100)
-    
-    @validator('leadId')
-    def validate_lead_id(cls, v):
-        try:
-            return sanitize_lead_id(v)
-        except ValueError as e:
-            raise ValueError(f"Invalid Lead ID: {str(e)}")
+    leadId: str = Field(..., min_length=1)
 
 class SubmitRequest(BaseModel):
     """Submit lead request"""
@@ -268,35 +194,24 @@ class SubmitResponse(BaseModel):
     leadId: str
 
 
-# ═══════════════════════════════════════════════════════════════════════════════════
-# ROUTES WITH SECURITY
-# ═══════════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# ROUTES
+# ═══════════════════════════════════════════════════════════════
 
 @api_router.get("/")
 async def root():
-    """Health check endpoint"""
     return {"status": "ok", "message": "Communitree Lead API is live."}
 
 
 @api_router.post("/check", response_model=CheckResponse)
-@limiter.limit("30/minute")  # Rate limit: 30 checks per minute
-async def check_duplicate(request: Request, check_request: CheckRequest):
+async def check_duplicate(request: CheckRequest):
     """
     Check if a leadId exists in the database.
     O(1) complexity using direct document lookup.
-    Rate limited to prevent abuse.
     """
     try:
-        # Validate request size
-        validate_request_size(check_request.dict(), max_size_kb=10)
-        
         # Normalize leadId (case-insensitive)
-        normalized_lead_id = check_request.leadId.strip().lower()
-        
-        # Security: Log excessive checks from same IP
-        client_ip = request.client.host
-        if anomaly_detector.check_suspicious_activity(f"check_{client_ip}", threshold=50):
-            log_security_event("EXCESSIVE_CHECK_REQUESTS", {"ip": client_ip})
+        normalized_lead_id = request.leadId.strip().lower()
         
         # Direct lookup using leadId as _id (O(1) operation)
         existing_lead = await db.leads.find_one(
@@ -306,42 +221,23 @@ async def check_duplicate(request: Request, check_request: CheckRequest):
         
         return CheckResponse(
             isDuplicate=existing_lead is not None,
-            leadId=check_request.leadId
+            leadId=request.leadId
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error checking duplicate: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred while checking lead")
+        raise HTTPException(status_code=500, detail=f"Error checking duplicate: {str(e)}")
 
 
 @api_router.post("/submit", response_model=SubmitResponse)
-@limiter.limit("10/minute")  # Rate limit: 10 submissions per minute
-async def submit_lead(request: Request, submit_request: SubmitRequest):
+async def submit_lead(request: SubmitRequest):
     """
     Submit a new lead or replace an existing one.
     Uses leadId as the document _id for O(1) operations.
     Syncs to Google Sheets if enabled.
-    Rate limited to prevent spam.
     """
     try:
-        # Validate request size (max 50KB)
-        validate_request_size(submit_request.dict(), max_size_kb=50)
-        
-        lead_data = submit_request.data
+        lead_data = request.data
         normalized_lead_id = lead_data.leadId.strip().lower()
-        
-        # Security: Detect suspicious submission patterns
-        client_ip = request.client.host
-        if anomaly_detector.check_suspicious_activity(f"submit_{normalized_lead_id}", threshold=5):
-            log_security_event("EXCESSIVE_SUBMISSIONS", {
-                "ip": client_ip,
-                "leadId": lead_data.leadId
-            })
-            raise HTTPException(
-                status_code=429,
-                detail="Too many submissions for this Lead ID. Please try again later."
-            )
         
         # Check if lead exists
         existing_lead = await db.leads.find_one(
@@ -350,14 +246,14 @@ async def submit_lead(request: Request, submit_request: SubmitRequest):
         )
         
         # If lead exists and replace is False, return error
-        if existing_lead and not submit_request.replace:
+        if existing_lead and not request.replace:
             return SubmitResponse(
                 success=False,
                 message=f"Lead {lead_data.leadId} already exists. Use replace=true to update.",
                 leadId=lead_data.leadId
             )
         
-        # Create lead object with validation
+        # Create lead object
         lead = Lead(**lead_data.model_dump())
         
         # Prepare document for MongoDB
@@ -389,27 +285,18 @@ async def submit_lead(request: Request, submit_request: SubmitRequest):
             leadId=lead_data.leadId
         )
         
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error submitting lead: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred while submitting lead")
+        raise HTTPException(status_code=500, detail=f"Error submitting lead: {str(e)}")
 
 
 @api_router.get("/lead/{lead_id}")
-@limiter.limit("60/minute")  # Rate limit: 60 requests per minute
-async def get_lead_by_id(request: Request, lead_id: str):
+async def get_lead_by_id(lead_id: str):
     """
     Get a specific lead by leadId
-    Rate limited to prevent scraping
     """
     try:
-        # Sanitize lead_id
-        sanitized_lead_id = sanitize_lead_id(lead_id)
-        normalized_lead_id = sanitized_lead_id.strip().lower()
-        
+        normalized_lead_id = lead_id.strip().lower()
         lead = await db.leads.find_one(
             {"_id": normalized_lead_id},
             {"_id": 0}
@@ -419,37 +306,29 @@ async def get_lead_by_id(request: Request, lead_id: str):
             raise HTTPException(status_code=404, detail="Lead not found")
         
         return {"success": True, "lead": lead}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching lead: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred while fetching lead")
+        raise HTTPException(status_code=500, detail=f"Error fetching lead: {str(e)}")
 
 
 @api_router.get("/leads")
-@limiter.limit("10/minute")  # Strict rate limit for bulk data
-async def get_all_leads(
-    request: Request,
-    api_key: Optional[str] = Depends(verify_api_key)
-):
+async def get_all_leads():
     """
-    Get all leads (admin endpoint - optional API key protection)
-    If API_KEY is set in .env, this endpoint requires authentication
+    Get all leads (for admin/debugging purposes)
     """
     try:
-        leads = await db.leads.find({}, {"_id": 0}).sort("submittedAt", -1).limit(1000).to_list(1000)
+        leads = await db.leads.find({}, {"_id": 0}).sort("submittedAt", -1).to_list(1000)
         return {"success": True, "count": len(leads), "leads": leads}
     except Exception as e:
         logger.error(f"Error fetching leads: {str(e)}")
-        raise HTTPException(status_code=500, detail="An error occurred while fetching leads")
+        raise HTTPException(status_code=500, detail=f"Error fetching leads: {str(e)}")
 
 
 # Include the router in the main app
 app.include_router(api_router)
 
-# CORS middleware (add after routes)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
