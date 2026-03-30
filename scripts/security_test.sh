@@ -4,7 +4,7 @@
 # Tests for common vulnerabilities
 
 API_URL=$(grep REACT_APP_BACKEND_URL /app/frontend/.env | cut -d '=' -f2 | tr -d '"')
-API_KEY="BWw0I8Jy5Cpgi45npsg-omQjvhU9UogWMmIxr1JSimY"
+API_KEY="${API_KEY:-YOUR_API_KEY_HERE}"
 
 echo "🔒 SECURITY TESTING - Communitree Lead API"
 echo "=========================================="

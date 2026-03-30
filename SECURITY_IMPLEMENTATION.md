@@ -124,7 +124,7 @@ Internal errors still logged but not exposed to users.
 **Setup:**
 ```bash
 # In .env:
-API_KEY="BWw0I8Jy5Cpgi45npsg-omQjvhU9UogWMmIxr1JSimY"
+API_KEY="YOUR_API_KEY_HERE"
 
 # Usage:
 curl -H "X-API-Key: YOUR_KEY" /api/leads

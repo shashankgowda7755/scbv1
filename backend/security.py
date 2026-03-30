@@ -4,8 +4,11 @@ Includes: Input sanitization, rate limiting, authentication
 """
 
 import re
+import time
+import hmac
+import unicodedata
 from typing import Optional
-from fastapi import HTTPException, Security, status
+from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 import os
 import logging
@@ -17,20 +20,61 @@ API_KEY = os.getenv("API_KEY", "")  # Set this in production
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
+# Brute-force tracker: {ip: {"failures": int, "window_start": float}}
+_api_key_failures: dict = {}
+_API_KEY_LOCKOUT_THRESHOLD = 10   # max failed attempts per window
+_API_KEY_LOCKOUT_WINDOW = 300     # 5-minute window
 
-async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
+
+async def verify_api_key(api_key: str = Security(api_key_header), request: Request = None) -> str:
     """
-    Verify API key for protected endpoints
+    Verify API key for protected endpoints with brute-force lockout.
+    After 10 failed attempts in 5 minutes from the same IP, further attempts are blocked.
     """
     if not API_KEY:
-        # If no API key is set, allow access (development mode)
-        return "dev_mode"
-    
-    if api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key not configured on server"
+        )
+
+    # Determine caller IP for brute-force tracking
+    caller_ip = "unknown"
+    if request is not None:
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        caller_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (
+            request.client.host if request.client else "unknown"
+        )
+
+    now = time.time()
+    entry = _api_key_failures.get(caller_ip)
+
+    # Reset window if expired
+    if entry and now - entry["window_start"] > _API_KEY_LOCKOUT_WINDOW:
+        del _api_key_failures[caller_ip]
+        entry = None
+
+    # Block if over threshold
+    if entry and entry["failures"] >= _API_KEY_LOCKOUT_THRESHOLD:
+        log_security_event("API_KEY_BRUTE_FORCE_BLOCKED", {"ip": caller_ip})
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later."
+        )
+
+    if not hmac.compare_digest(api_key or "", API_KEY):
+        # Record failure
+        if caller_ip not in _api_key_failures:
+            _api_key_failures[caller_ip] = {"failures": 0, "window_start": now}
+        _api_key_failures[caller_ip]["failures"] += 1
+        log_security_event("API_KEY_FAILURE", {"ip": caller_ip,
+            "attempts": _api_key_failures[caller_ip]["failures"]})
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or missing API Key"
         )
+
+    # Successful auth — clear any failure record
+    _api_key_failures.pop(caller_ip, None)
     return api_key
 
 
@@ -45,9 +89,9 @@ def sanitize_string(input_str: str, max_length: int = 500) -> str:
     """
     if not input_str:
         return ""
-    
-    # Convert to string and strip whitespace
-    sanitized = str(input_str).strip()
+
+    # Normalize Unicode to prevent homograph/bypass attacks (NFC canonical form)
+    sanitized = unicodedata.normalize('NFC', str(input_str)).strip()
     
     # Limit length
     sanitized = sanitized[:max_length]
@@ -140,6 +184,8 @@ class SecurityHeaders:
             "X-XSS-Protection": "1; mode=block",
             "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
             "Content-Security-Policy": "default-src 'self'",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
         }
 
 
@@ -150,27 +196,38 @@ def log_security_event(event_type: str, details: dict):
     logger.warning(f"SECURITY EVENT: {event_type} - {details}")
 
 
-# IP-based anomaly detection (simple implementation)
+# IP-based anomaly detection with 1-hour sliding window
 class SimpleAnomalyDetector:
+    WINDOW_SECONDS = 3600  # Reset counter after 1 hour of inactivity
+
     def __init__(self):
-        self.submission_count = {}
-    
+        self.submission_data = {}  # {identifier: {"count": int, "window_start": float}}
+
     def check_suspicious_activity(self, identifier: str, threshold: int = 10) -> bool:
         """
-        Check if an identifier (IP, Lead ID) has excessive submissions
+        Check if an identifier (IP, Lead ID) has excessive submissions within the window.
+        Counters reset automatically after WINDOW_SECONDS, preventing permanent blocks.
         """
-        if identifier not in self.submission_count:
-            self.submission_count[identifier] = 0
-        
-        self.submission_count[identifier] += 1
-        
-        if self.submission_count[identifier] > threshold:
+        now = time.time()
+        entry = self.submission_data.get(identifier)
+
+        if entry is None or now - entry["window_start"] > self.WINDOW_SECONDS:
+            # Purge all expired entries to prevent unbounded memory growth
+            self.submission_data = {
+                k: v for k, v in self.submission_data.items()
+                if now - v["window_start"] <= self.WINDOW_SECONDS
+            }
+            self.submission_data[identifier] = {"count": 1, "window_start": now}
+            return False
+
+        entry["count"] += 1
+        if entry["count"] > threshold:
             log_security_event("SUSPICIOUS_ACTIVITY", {
                 "identifier": identifier,
-                "count": self.submission_count[identifier]
+                "count": entry["count"]
             })
             return True
-        
+
         return False
 
 anomaly_detector = SimpleAnomalyDetector()

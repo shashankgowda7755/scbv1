@@ -33,9 +33,14 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ.get('MONGO_URL')
+if not mongo_url:
+    raise ValueError("MONGO_URL environment variable is required but not set")
+db_name = os.environ.get('DB_NAME')
+if not db_name:
+    raise ValueError("DB_NAME environment variable is required but not set")
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[db_name]
 
 # Google Sheets setup
 SHEETS_ENABLED = os.getenv('GOOGLE_SHEETS_ENABLED', 'false').lower() == 'true'
@@ -57,6 +62,15 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 api_router = APIRouter(prefix="/api")
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract real client IP, handling proxy X-Forwarded-For headers."""
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # First entry is the original client; strip whitespace
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # SECURITY MIDDLEWARE
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -70,8 +84,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers[key] = value
         return response
 
-# Add security headers middleware
+
+class MaxBodySizeMiddleware(BaseHTTPMiddleware):
+    """Reject requests with body larger than 50KB before they are parsed"""
+    MAX_BODY_BYTES = 50 * 1024  # 50 KB
+
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > self.MAX_BODY_BYTES:
+            return JSONResponse(
+                status_code=413,
+                content={"detail": "Request body too large (max 50KB)"}
+            )
+        return await call_next(request)
+
+
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(MaxBodySizeMiddleware)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -122,8 +151,8 @@ def sync_lead_to_sheets(lead_data):
             try:
                 dt = datetime.fromisoformat(submitted_at.replace('Z', '+00:00'))
                 submitted_at = dt.strftime('%Y-%m-%d %H:%M:%S')
-            except:
-                pass
+            except (ValueError, AttributeError):
+                logger.warning("Could not parse submitted_at date, using raw value")
         
         row = [
             lead_data.get('leadId', ''),
@@ -206,8 +235,8 @@ class Lead(BaseModel):
         sanitized = re.sub(r'[^0-9+\-() ]', '', v)
         if len(sanitized) > 20:
             raise ValueError("Phone number too long")
-        if len(sanitized) < 3:
-            raise ValueError("Phone number too short")
+        if not re.search(r'\d{7,}', sanitized):
+            raise ValueError("Phone number must contain at least 7 digits")
         return sanitized
 
 class LeadCreate(BaseModel):
@@ -236,8 +265,8 @@ class LeadCreate(BaseModel):
         sanitized = re.sub(r'[^0-9+\-() ]', '', v)
         if len(sanitized) > 20:
             raise ValueError("Phone number too long")
-        if len(sanitized) < 3:
-            raise ValueError("Phone number too short")
+        if not re.search(r'\d{7,}', sanitized):
+            raise ValueError("Phone number must contain at least 7 digits")
         return sanitized
 
 class CheckRequest(BaseModel):
@@ -260,6 +289,7 @@ class CheckResponse(BaseModel):
     """Check duplicate response"""
     isDuplicate: bool
     leadId: str
+    lead: Optional[dict] = None
 
 class SubmitResponse(BaseModel):
     """Submit lead response"""
@@ -294,19 +324,20 @@ async def check_duplicate(request: Request, check_request: CheckRequest):
         normalized_lead_id = check_request.leadId.strip().lower()
         
         # Security: Log excessive checks from same IP
-        client_ip = request.client.host
+        client_ip = get_client_ip(request)
         if anomaly_detector.check_suspicious_activity(f"check_{client_ip}", threshold=50):
             log_security_event("EXCESSIVE_CHECK_REQUESTS", {"ip": client_ip})
         
         # Direct lookup using leadId as _id (O(1) operation)
         existing_lead = await db.leads.find_one(
             {"_id": normalized_lead_id},
-            {"_id": 1}
+            {"_id": 0}
         )
-        
+
         return CheckResponse(
             isDuplicate=existing_lead is not None,
-            leadId=check_request.leadId
+            leadId=check_request.leadId,
+            lead=existing_lead if existing_lead else None
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -332,7 +363,7 @@ async def submit_lead(request: Request, submit_request: SubmitRequest):
         normalized_lead_id = lead_data.leadId.strip().lower()
         
         # Security: Detect suspicious submission patterns
-        client_ip = request.client.host
+        client_ip = get_client_ip(request)
         if anomaly_detector.check_suspicious_activity(f"submit_{normalized_lead_id}", threshold=5):
             log_security_event("EXCESSIVE_SUBMISSIONS", {
                 "ip": client_ip,
@@ -399,8 +430,8 @@ async def submit_lead(request: Request, submit_request: SubmitRequest):
 
 
 @api_router.get("/lead/{lead_id}")
-@limiter.limit("60/minute")  # Rate limit: 60 requests per minute
-async def get_lead_by_id(request: Request, lead_id: str):
+@limiter.limit("30/minute")
+async def get_lead_by_id(request: Request, lead_id: str, api_key: str = Depends(verify_api_key)):
     """
     Get a specific lead by leadId
     Rate limited to prevent scraping
@@ -432,11 +463,10 @@ async def get_lead_by_id(request: Request, lead_id: str):
 @limiter.limit("10/minute")  # Strict rate limit for bulk data
 async def get_all_leads(
     request: Request,
-    api_key: Optional[str] = Depends(verify_api_key)
+    api_key: str = Depends(verify_api_key)
 ):
     """
-    Get all leads (admin endpoint - optional API key protection)
-    If API_KEY is set in .env, this endpoint requires authentication
+    Get all leads (admin endpoint - requires API key)
     """
     try:
         leads = await db.leads.find({}, {"_id": 0}).sort("submittedAt", -1).limit(1000).to_list(1000)
@@ -453,9 +483,9 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(','),
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Accept", "X-API-Key"],
 )
 
 # Configure logging

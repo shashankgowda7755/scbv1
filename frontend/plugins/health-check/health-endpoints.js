@@ -1,8 +1,6 @@
 // health-endpoints.js
 // API endpoints for health checks and monitoring
 
-const os = require('os');
-
 const SERVER_START_TIME = Date.now();
 
 /**
@@ -29,7 +27,6 @@ function setupHealthEndpoints(devServer, healthPlugin) {
   devServer.app.get("/health", (req, res) => {
     const webpackStatus = healthPlugin.getStatus();
     const uptime = Date.now() - SERVER_START_TIME;
-    const memUsage = process.memoryUsage();
 
     res.json({
       status: webpackStatus.isHealthy ? 'healthy' : 'unhealthy',
@@ -57,23 +54,6 @@ function setupHealthEndpoints(devServer, healthPlugin) {
         firstCompileTime: webpackStatus.firstCompileTime
           ? new Date(webpackStatus.firstCompileTime).toISOString()
           : null,
-      },
-      server: {
-        nodeVersion: process.version,
-        platform: os.platform(),
-        arch: os.arch(),
-        cpus: os.cpus().length,
-        memory: {
-          heapUsed: formatBytes(memUsage.heapUsed),
-          heapTotal: formatBytes(memUsage.heapTotal),
-          rss: formatBytes(memUsage.rss),
-          external: formatBytes(memUsage.external),
-        },
-        systemMemory: {
-          total: formatBytes(os.totalmem()),
-          free: formatBytes(os.freemem()),
-          used: formatBytes(os.totalmem() - os.freemem()),
-        },
       },
       environment: process.env.NODE_ENV || 'development',
     });

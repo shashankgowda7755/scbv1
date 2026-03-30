@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import "@/App.css";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,28 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+function validateForm(data) {
+  if (!data.leadId || !/^[a-zA-Z0-9\-_]+$/.test(data.leadId)) {
+    return "Lead ID may only contain letters, numbers, hyphens, and underscores.";
+  }
+  if (!data.email || !/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/.test(data.email)) {
+    return "Please enter a valid email address.";
+  }
+  if (!data.phone || !/^[0-9+\-()\s]{7,20}$/.test(data.phone)) {
+    return "Please enter a valid phone number (7–20 digits).";
+  }
+  if (!data.fullName || data.fullName.trim().length === 0 || data.fullName.length > 200) {
+    return "Full name is required (max 200 characters).";
+  }
+  if (!data.company || data.company.trim().length === 0 || data.company.length > 200) {
+    return "Company is required (max 200 characters).";
+  }
+  if (!data.orgName || data.orgName.trim().length === 0 || data.orgName.length > 200) {
+    return "Organization name is required (max 200 characters).";
+  }
+  return null;
+}
+
 function App() {
   const [formData, setFormData] = useState({
     leadId: "",
@@ -23,6 +45,7 @@ function App() {
   });
 
   const [loading, setLoading] = useState(false);
+  const lastSubmitRef = useRef(0);
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   
@@ -44,10 +67,24 @@ function App() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
+    const now = Date.now();
+    if (now - lastSubmitRef.current < 2000) {
+      setErrorMessage("Please wait a moment before submitting again.");
+      return;
+    }
+
+    const validationError = validateForm(formData);
+    if (validationError) {
+      setErrorMessage(validationError);
+      return;
+    }
+
+    lastSubmitRef.current = now;
+
     setLoading(true);
     setSuccessMessage("");
     setErrorMessage("");
-    
+
     try {
       // Step 1: Check if lead exists
       const checkResponse = await axios.post(`${API}/check`, {
@@ -55,24 +92,16 @@ function App() {
       });
       
       if (checkResponse.data.isDuplicate) {
-        // Lead exists - fetch old data and show confirmation dialog
-        try {
-          const oldDataResponse = await axios.get(`${API}/lead/${formData.leadId}`);
-          setOldLeadData(oldDataResponse.data.lead);
-          setPendingSubmission(formData);
-          setShowDuplicateDialog(true);
-        } catch (err) {
-          // If we can't fetch old data, still show dialog
-          setOldLeadData(null);
-          setPendingSubmission(formData);
-          setShowDuplicateDialog(true);
-        }
+        // Lead exists — use lead data already returned by /check (no second request needed)
+        setOldLeadData(checkResponse.data.lead || null);
+        setPendingSubmission(formData);
+        setShowDuplicateDialog(true);
       } else {
         // No duplicate - submit directly
         await submitLead(formData, false);
       }
     } catch (error) {
-      setErrorMessage(error.response?.data?.detail || "Error checking lead. Please try again.");
+      setErrorMessage("Error checking lead status. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -100,7 +129,7 @@ function App() {
         setErrorMessage(response.data.message || "Submission failed");
       }
     } catch (error) {
-      setErrorMessage(error.response?.data?.detail || "Error submitting lead. Please try again.");
+      setErrorMessage("Error submitting lead. Please try again.");
     }
   };
 
