@@ -480,10 +480,15 @@ async def get_all_leads(
 app.include_router(api_router)
 
 # CORS middleware (add after routes)
+_cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
+_cors_origins = [o.strip() for o in _cors_origins if o.strip()]
+# Always allow the GitHub Pages deployment
+if 'https://shashankgowda7755.github.io' not in _cors_origins:
+    _cors_origins.append('https://shashankgowda7755.github.io')
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(','),
+    allow_origins=_cors_origins,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Accept", "X-API-Key"],
 )
