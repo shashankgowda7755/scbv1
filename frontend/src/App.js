@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState } from "react";
 import "@/App.css";
 import axios from "axios";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,6 @@ function App() {
   });
 
   const [loading, setLoading] = useState(false);
-  const lastSubmitRef = useRef(0);
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   
@@ -66,20 +65,14 @@ function App() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const now = Date.now();
-    if (now - lastSubmitRef.current < 2000) {
-      setErrorMessage("Please wait a moment before submitting again.");
-      return;
-    }
+
+    if (loading) return;
 
     const validationError = validateForm(formData);
     if (validationError) {
       setErrorMessage(validationError);
       return;
     }
-
-    lastSubmitRef.current = now;
 
     setLoading(true);
     setSuccessMessage("");
@@ -115,8 +108,7 @@ function App() {
       });
       
       if (response.data.success) {
-        setSuccessMessage("Thank you for submitting!");
-        // Clear form
+        setSuccessMessage("✅ Lead submitted successfully! Thank you.");
         setFormData({
           leadId: "",
           email: "",
@@ -125,8 +117,10 @@ function App() {
           company: "",
           orgName: ""
         });
+        // Auto-clear success message after 5 seconds
+        setTimeout(() => setSuccessMessage(""), 5000);
       } else {
-        setErrorMessage(response.data.message || "Submission failed");
+        setErrorMessage(response.data.message || "Submission failed. Please try again.");
       }
     } catch (error) {
       setErrorMessage("Error submitting lead. Please try again.");
