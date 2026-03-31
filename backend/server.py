@@ -482,9 +482,10 @@ app.include_router(api_router)
 # CORS middleware (add after routes)
 _cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
 _cors_origins = [o.strip() for o in _cors_origins if o.strip()]
-# Always allow the GitHub Pages deployment
-if 'https://shashankgowda7755.github.io' not in _cors_origins:
-    _cors_origins.append('https://shashankgowda7755.github.io')
+# Always allow the permanent deployments
+for _origin in ['https://shashankgowda7755.github.io', 'https://build-pi-taupe.vercel.app']:
+    if _origin not in _cors_origins:
+        _cors_origins.append(_origin)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
