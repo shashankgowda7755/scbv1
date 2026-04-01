@@ -24,6 +24,16 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 _api_key_failures: dict = {}
 _API_KEY_LOCKOUT_THRESHOLD = 10   # max failed attempts per window
 _API_KEY_LOCKOUT_WINDOW = 300     # 5-minute window
+_API_KEY_MAX_TRACKED_IPS = 10_000  # hard cap to prevent memory exhaustion
+
+
+def _purge_expired_api_key_failures() -> None:
+    """Remove expired entries from the brute-force tracker."""
+    now = time.time()
+    expired = [k for k, v in _api_key_failures.items()
+               if now - v["window_start"] > _API_KEY_LOCKOUT_WINDOW]
+    for k in expired:
+        del _api_key_failures[k]
 
 
 async def verify_api_key(api_key: str = Security(api_key_header), request: Request = None) -> str:
@@ -62,7 +72,9 @@ async def verify_api_key(api_key: str = Security(api_key_header), request: Reque
         )
 
     if not hmac.compare_digest(api_key or "", API_KEY):
-        # Record failure
+        # Record failure — purge first if dict is too large (prevent memory exhaustion)
+        if len(_api_key_failures) >= _API_KEY_MAX_TRACKED_IPS:
+            _purge_expired_api_key_failures()
         if caller_ip not in _api_key_failures:
             _api_key_failures[caller_ip] = {"failures": 0, "window_start": now}
         _api_key_failures[caller_ip]["failures"] += 1
@@ -97,8 +109,8 @@ def sanitize_string(input_str: str, max_length: int = 500) -> str:
     sanitized = sanitized[:max_length]
     
     # Remove MongoDB operators and special characters
-    # Remove: $ { } [ ] ( ) < > ; | & ` \ " '
-    dangerous_chars = ['$', '{', '}', '[', ']', '<', '>', '|', '&', '`', '\\']
+    # Remove: $ { } [ ] < > | & ` \ " '
+    dangerous_chars = ['$', '{', '}', '[', ']', '<', '>', '|', '&', '`', '\\', "'", '"']
     for char in dangerous_chars:
         sanitized = sanitized.replace(char, '')
     
