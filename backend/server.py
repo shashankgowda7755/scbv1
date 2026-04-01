@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
@@ -18,8 +19,8 @@ from google.oauth2.service_account import Credentials
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from security import (
-    sanitize_string, 
-    sanitize_lead_id, 
+    sanitize_string,
+    sanitize_lead_id,
     sanitize_email,
     validate_request_size,
     SecurityHeaders,
@@ -28,6 +29,12 @@ from security import (
     log_security_event
 )
 
+# Configure logging before anything else uses logger
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -53,8 +60,15 @@ executor = ThreadPoolExecutor(max_workers=3)
 # Rate limiting setup
 limiter = Limiter(key_func=get_remote_address)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    client.close()
+
+
 # Create the main app
-app = FastAPI(title="Communitree Lead API - Secured")
+app = FastAPI(title="Communitree Lead API - Secured", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -190,7 +204,7 @@ def sync_lead_to_sheets(lead_data):
 
 async def sync_lead_to_sheets_async(lead_data):
     """Async wrapper for Google Sheets sync"""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(executor, sync_lead_to_sheets, lead_data)
 
 
@@ -329,15 +343,16 @@ async def check_duplicate(request: Request, check_request: CheckRequest):
             log_security_event("EXCESSIVE_CHECK_REQUESTS", {"ip": client_ip})
         
         # Direct lookup using leadId as _id (O(1) operation)
+        # Fetch only _id — never return PII from an unauthenticated endpoint
         existing_lead = await db.leads.find_one(
             {"_id": normalized_lead_id},
-            {"_id": 0}
+            {"_id": 1}
         )
 
         return CheckResponse(
             isDuplicate=existing_lead is not None,
             leadId=check_request.leadId,
-            lead=existing_lead if existing_lead else None
+            lead=None  # PII must not be returned from unauthenticated /check
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -494,13 +509,3 @@ app.add_middleware(
     allow_headers=["Content-Type", "Accept", "X-API-Key"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
