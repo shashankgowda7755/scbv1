@@ -498,7 +498,7 @@ app.include_router(api_router)
 _cors_origins = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
 _cors_origins = [o.strip() for o in _cors_origins if o.strip()]
 # Always allow the permanent deployments
-for _origin in ['https://shashankgowda7755.github.io', 'https://build-pi-taupe.vercel.app', 'https://frontend-iota-jade-55.vercel.app']:
+for _origin in ['https://shashankgowda7755.github.io', 'https://build-pi-taupe.vercel.app', 'https://frontend-iota-jade-55.vercel.app', 'https://scbv1-eight.vercel.app']:
     if _origin not in _cors_origins:
         _cors_origins.append(_origin)
 app.add_middleware(
