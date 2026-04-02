@@ -249,7 +249,7 @@ class Lead(BaseModel):
         sanitized = re.sub(r'[^0-9+\-() ]', '', v)
         if len(sanitized) > 20:
             raise ValueError("Phone number too long")
-        if not re.search(r'\d{7,}', sanitized):
+        if len(re.findall(r'\d', sanitized)) < 7:
             raise ValueError("Phone number must contain at least 7 digits")
         return sanitized
 
@@ -279,7 +279,7 @@ class LeadCreate(BaseModel):
         sanitized = re.sub(r'[^0-9+\-() ]', '', v)
         if len(sanitized) > 20:
             raise ValueError("Phone number too long")
-        if not re.search(r'\d{7,}', sanitized):
+        if len(re.findall(r'\d', sanitized)) < 7:
             raise ValueError("Phone number must contain at least 7 digits")
         return sanitized
 
