@@ -12,25 +12,34 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
-// Railway trial plan sleeps services after inactivity.
-// This helper retries requests while the backend wakes up (503 → retry).
-async function apiPost(url, data, maxRetries = 3) {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+// Railway trial plan sleeps services after inactivity. Cold start can take 15-30s.
+// This helper sends a wake-up ping first, then retries the actual request.
+async function wakeBackend() {
+  for (let i = 0; i < 10; i++) {
     try {
-      const response = await axios.post(url, data, { timeout: 15000 });
-      return response;
-    } catch (err) {
-      const status = err.response?.status;
-      const isRetryable = !status || status === 502 || status === 503 || status === 504;
-      if (isRetryable && attempt < maxRetries) {
-        // Wait progressively longer: 2s, 4s, 6s
-        await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
-        continue;
-      }
-      throw err;
+      await axios.get(`${API}/`, { timeout: 5000 });
+      return true; // Backend is awake
+    } catch {
+      await new Promise(r => setTimeout(r, 3000)); // Wait 3s between pings
     }
   }
+  return false; // Gave up after ~30s
 }
+
+async function apiPost(url, data) {
+  try {
+    return await axios.post(url, data, { timeout: 10000 });
+  } catch (firstErr) {
+    // First attempt failed — backend is likely sleeping. Wake it up.
+    const awake = await wakeBackend();
+    if (!awake) throw firstErr;
+    // Backend is awake now — retry the actual request
+    return await axios.post(url, data, { timeout: 10000 });
+  }
+}
+
+// Pre-warm: ping the backend when the page loads so it's ready by submit time
+axios.get(`${API}/`, { timeout: 5000 }).catch(() => {});
 
 function validateForm(data) {
   if (!data.leadId || !/^[a-zA-Z0-9\-_]+$/.test(data.leadId)) {
