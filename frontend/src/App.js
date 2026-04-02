@@ -12,6 +12,26 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
+// Railway trial plan sleeps services after inactivity.
+// This helper retries requests while the backend wakes up (503 → retry).
+async function apiPost(url, data, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await axios.post(url, data, { timeout: 15000 });
+      return response;
+    } catch (err) {
+      const status = err.response?.status;
+      const isRetryable = !status || status === 502 || status === 503 || status === 504;
+      if (isRetryable && attempt < maxRetries) {
+        // Wait progressively longer: 2s, 4s, 6s
+        await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 function validateForm(data) {
   if (!data.leadId || !/^[a-zA-Z0-9\-_]+$/.test(data.leadId)) {
     return "Lead ID may only contain letters, numbers, hyphens, and underscores.";
@@ -80,7 +100,7 @@ function App() {
 
     try {
       // Step 1: Check if lead exists
-      const checkResponse = await axios.post(`${API}/check`, {
+      const checkResponse = await apiPost(`${API}/check`, {
         leadId: formData.leadId
       });
       
@@ -102,7 +122,7 @@ function App() {
 
   const submitLead = async (data, replace) => {
     try {
-      const response = await axios.post(`${API}/submit`, {
+      const response = await apiPost(`${API}/submit`, {
         data: data,
         replace: replace
       });
@@ -280,7 +300,7 @@ function App() {
                 data-testid="submit-button"
               >
                 {loading ? (
-                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</>
+                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Submitting (may take a moment)...</>
                 ) : (
                   "Submit Lead"
                 )}
