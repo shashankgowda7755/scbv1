@@ -9,37 +9,8 @@ import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogFoo
 import { CheckCircle2, Loader2, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
-
-// Railway trial plan sleeps services after inactivity. Cold start can take 15-30s.
-// This helper sends a wake-up ping first, then retries the actual request.
-async function wakeBackend() {
-  for (let i = 0; i < 10; i++) {
-    try {
-      await axios.get(`${API}/`, { timeout: 5000 });
-      return true; // Backend is awake
-    } catch {
-      await new Promise(r => setTimeout(r, 3000)); // Wait 3s between pings
-    }
-  }
-  return false; // Gave up after ~30s
-}
-
-async function apiPost(url, data) {
-  try {
-    return await axios.post(url, data, { timeout: 10000 });
-  } catch (firstErr) {
-    // First attempt failed — backend is likely sleeping. Wake it up.
-    const awake = await wakeBackend();
-    if (!awake) throw firstErr;
-    // Backend is awake now — retry the actual request
-    return await axios.post(url, data, { timeout: 10000 });
-  }
-}
-
-// Pre-warm: ping the backend when the page loads so it's ready by submit time
-axios.get(`${API}/`, { timeout: 5000 }).catch(() => {});
+// API is same-origin on Vercel — no CORS, no external backend dependency
+const API = "/api";
 
 function validateForm(data) {
   if (!data.leadId || !/^[a-zA-Z0-9\-_]+$/.test(data.leadId)) {
@@ -109,7 +80,7 @@ function App() {
 
     try {
       // Step 1: Check if lead exists
-      const checkResponse = await apiPost(`${API}/check`, {
+      const checkResponse = await axios.post(`${API}/check`, {
         leadId: formData.leadId
       });
       
@@ -131,7 +102,7 @@ function App() {
 
   const submitLead = async (data, replace) => {
     try {
-      const response = await apiPost(`${API}/submit`, {
+      const response = await axios.post(`${API}/submit`, {
         data: data,
         replace: replace
       });
@@ -309,7 +280,7 @@ function App() {
                 data-testid="submit-button"
               >
                 {loading ? (
-                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Submitting (may take a moment)...</>
+                  <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Processing...</>
                 ) : (
                   "Submit Lead"
                 )}

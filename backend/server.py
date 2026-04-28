@@ -43,10 +43,17 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ.get('MONGO_URL')
 if not mongo_url:
     raise ValueError("MONGO_URL environment variable is required but not set")
-db_name = os.environ.get('DB_NAME')
-if not db_name:
-    raise ValueError("DB_NAME environment variable is required but not set")
-client = AsyncIOMotorClient(mongo_url)
+db_name = os.environ.get('DB_NAME', 'leads_database')
+
+# Railway MongoDB proxy — always reachable from within Railway network
+RAILWAY_MONGO_PROXY = "mongodb://interchange.proxy.rlwy.net:20863"
+
+client = AsyncIOMotorClient(
+    mongo_url,
+    serverSelectionTimeoutMS=8000,
+    connectTimeoutMS=8000,
+    socketTimeoutMS=30000,
+)
 db = client[db_name]
 
 # Google Sheets setup
@@ -63,6 +70,28 @@ limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global client, db
+    # Test primary MongoDB at startup; auto-fallback to Railway proxy if unreachable
+    try:
+        await asyncio.wait_for(db.command("ping"), timeout=6.0)
+        logger.info("MongoDB primary connection OK")
+    except Exception as primary_err:
+        logger.warning(f"Primary MongoDB unreachable ({primary_err}). Switching to Railway proxy...")
+        try:
+            fallback_client = AsyncIOMotorClient(
+                RAILWAY_MONGO_PROXY,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=15000,
+            )
+            await asyncio.wait_for(
+                fallback_client[db_name].command("ping"), timeout=6.0
+            )
+            client = fallback_client
+            db = client[db_name]
+            logger.info("MongoDB fallback (Railway proxy) connection OK")
+        except Exception as fallback_err:
+            logger.error(f"Fallback MongoDB also failed: {fallback_err}")
     yield
     client.close()
 
