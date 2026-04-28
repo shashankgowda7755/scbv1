@@ -88,8 +88,12 @@ def health():
 def check_duplicate(req: CheckRequest):
     try:
         norm = req.leadId.strip().lower()
-        existing = _db.leads.find_one({"_id": norm}, {"_id": 1})
-        return {"isDuplicate": existing is not None, "leadId": req.leadId, "lead": None}
+        existing = _db.leads.find_one({"_id": norm})
+        if existing:
+            # Strip internal _id; return the rest so the frontend can show the previous entry
+            lead_data = {k: v for k, v in existing.items() if k != "_id"}
+            return {"isDuplicate": True, "leadId": req.leadId, "lead": lead_data}
+        return {"isDuplicate": False, "leadId": req.leadId, "lead": None}
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
