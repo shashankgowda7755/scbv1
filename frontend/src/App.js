@@ -12,6 +12,7 @@ import {
   subscribeAttendance,
   createEvent,
   deleteEvent,
+  resetEventData,
   saveRegistration,
   saveCheckIn,
   saveCheckOut,
@@ -28,7 +29,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.5-event-scope-2026-05-25";
+const BUILD_STAMP = "v2.6-reset-per-event-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -948,6 +949,26 @@ function App() {
     }
   }
 
+  async function handleResetEventData(eventOrId) {
+    const ev = typeof eventOrId === "string"
+      ? events.find((e) => e.id === eventOrId)
+      : (eventOrId || selectedEvent);
+    if (!ev) return;
+    const typed = window.prompt(
+      `This wipes ALL data tied to "${ev.title}" — registrations, check-ins, check-outs, attendance — but keeps the event itself so you can re-run it.\n\nType the word RESET to confirm.`,
+    );
+    if (typed !== "RESET") {
+      if (typed !== null) setMessage({ type: "error", text: "Reset cancelled — confirmation word didn't match." });
+      return;
+    }
+    try {
+      await resetEventData(ev.id);
+      setMessage({ type: "success", text: `Event data reset for "${ev.title}". Event preserved.` });
+    } catch (error) {
+      setMessage({ type: "error", text: `Failed to reset event data: ${error?.message || error}` });
+    }
+  }
+
   async function handleCopyShareLink() {
     if (!shareUrl) {
       return;
@@ -1507,9 +1528,6 @@ function App() {
                 </button>
               </div>
             )}
-            <button type="button" className="scb-reset-btn" onClick={handleHardReset} title="Wipe local data and reload">
-              Reset
-            </button>
             <div className="scb-build">build {BUILD_STAMP}</div>
           </div>
         </aside>
@@ -2399,7 +2417,7 @@ function App() {
                             <TableRow key={ev.id} className={isActive ? "row-active" : ""}>
                               <TableCell>
                                 <strong>{ev.title}</strong>
-                                {isActive && <span className="row-active-pill">ACTIVE</span>}
+                                {isActive && <span className="row-active-pill">CURRENT</span>}
                               </TableCell>
                               <TableCell>{formatDate(ev.eventDate)}</TableCell>
                               <TableCell>{ev.location}</TableCell>
@@ -2420,6 +2438,9 @@ function App() {
                                   </Button>
                                   <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedEventId(ev.id); setActiveTab("reports"); }}>
                                     <FileText className="mr-1 h-3.5 w-3.5" /> Report
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => handleResetEventData(ev)} title="Wipe this event's registrations + check-ins + check-outs; keep the event">
+                                    <RefreshCw className="mr-1 h-3.5 w-3.5" /> Reset Data
                                   </Button>
                                 </div>
                               </TableCell>
@@ -2477,9 +2498,13 @@ function App() {
                             <FileText className="mr-2 h-4 w-4" />
                             View Report
                           </Button>
-                          <Button type="button" variant="outline" onClick={handleDeleteEvent}>
+                          <Button type="button" variant="outline" onClick={() => handleResetEventData(selectedEvent)} title="Wipe registrations + check-ins + check-outs for this event; keep the event itself">
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Reset Event Data
+                          </Button>
+                          <Button type="button" variant="outline" onClick={handleDeleteEvent} title="Delete the event entirely and all its data">
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Purge Event
+                            Delete Event
                           </Button>
                         </div>
                       </>

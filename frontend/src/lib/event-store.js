@@ -543,6 +543,29 @@ export async function deleteEvent(eventId) {
   return deleteEventCascade(eventId);
 }
 
+// Wipe all child data for an event but keep the event doc itself.
+// Used for "Reset Event Data" — re-run a dry-run or recovered event without
+// destroying the event configuration (title, date, location, duplicate rule).
+export async function resetEventData(eventId) {
+  if (getFirebaseMode() === "firebase") {
+    for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
+      const snap = await getDocs(collection(firestoreDb, sub));
+      await Promise.all(
+        snap.docs
+          .filter((d) => d.data().eventId === eventId)
+          .map((d) => deleteDoc(doc(firestoreDb, sub, d.id))),
+      );
+    }
+    return;
+  }
+  const store = loadDemoStore();
+  for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
+    store[sub] = (store[sub] || []).filter((item) => item.eventId !== eventId);
+  }
+  saveDemoStore(store);
+  notifyDemoListeners();
+}
+
 export async function setEventStatus(eventId, status) {
   if (!["active", "closed"].includes(status)) {
     throw new Error(`Invalid event status: ${status}`);
