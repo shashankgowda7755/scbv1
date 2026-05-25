@@ -29,7 +29,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.9-activate-toggle-2026-05-25";
+const BUILD_STAMP = "v3.0-reveal-copy-fix-2026-05-26";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -141,6 +141,42 @@ const PARTICIPANT_MODES = new Set(["register", "checkin", "checkout"]);
 
 function eventStatusLabel(status) {
   return status === "closed" ? "INACTIVE" : "ACTIVE";
+}
+
+// Robust clipboard copy.
+// navigator.clipboard.writeText silently fails in some mobile browsers and on
+// Permissions-Policy-restricted iframes, which is why operators were copying
+// "nothing" and seeing the page hang while waiting on the rejected Promise.
+// Falls back to a hidden textarea + document.execCommand("copy") and finally
+// to a manual prompt() so the operator can hand-copy as a last resort.
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  if (typeof navigator !== "undefined" && navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // fall through to execCommand path
+    }
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    if (ok) return true;
+  } catch {
+    // fall through
+  }
+  try {
+    window.prompt("Copy this link manually:", text);
+  } catch {}
+  return false;
 }
 
 function getParticipantMode() {
@@ -688,9 +724,13 @@ function App() {
       cancelled = true;
     };
     // decryptedById is intentionally excluded — including it would loop because
-    // this effect calls setDecryptedById on every run.
+    // this effect calls setDecryptedById on every run. eventRegistrations is
+    // also excluded because it is computed inline (registrations.filter(...))
+    // and produces a fresh reference every render — using it as a dep was
+    // causing an unbounded render loop the moment Reveal flipped privacyMode
+    // to false.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [privacyMode, eventRegistrations]);
+  }, [privacyMode, registrations, selectedEventId]);
 
   // Duplicate dialog needs the existing record decrypted so the operator can
   // confirm it really is the same person before replacing.
@@ -980,16 +1020,9 @@ function App() {
   }
 
   async function handleCopyShareLink() {
-    if (!shareUrl) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setCopyMessage("Registration link copied.");
-    } catch (error) {
-      setCopyMessage("Copy failed. Use the link shown in the dashboard.");
-    }
+    if (!shareUrl) return;
+    const ok = await copyTextToClipboard(shareUrl);
+    setCopyMessage(ok ? "Registration link copied." : "Copy failed — link shown in prompt.");
   }
 
   async function handleExportSelectedEvent() {
@@ -1864,7 +1897,7 @@ function App() {
                           <Label>Check-In Desk URL</Label>
                           <div className="link-row">
                             <div className="link-box">{getCheckInUrl(selectedEvent.id)}</div>
-                            <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckInUrl(selectedEvent.id))}>
+                            <Button type="button" variant="outline" onClick={() => copyTextToClipboard(getCheckInUrl(selectedEvent.id))}>
                               <Link2 className="mr-2 h-4 w-4" /> Copy
                             </Button>
                           </div>
@@ -1873,7 +1906,7 @@ function App() {
                           <Label>Checkout Desk URL</Label>
                           <div className="link-row">
                             <div className="link-box">{getCheckOutUrl(selectedEvent.id)}</div>
-                            <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckOutUrl(selectedEvent.id))}>
+                            <Button type="button" variant="outline" onClick={() => copyTextToClipboard(getCheckOutUrl(selectedEvent.id))}>
                               <Link2 className="mr-2 h-4 w-4" /> Copy
                             </Button>
                           </div>
@@ -1976,7 +2009,7 @@ function App() {
 
                       <div className="link-row">
                         <div className="link-box">{getCheckInUrl(selectedEvent.id)}</div>
-                        <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckInUrl(selectedEvent.id))}>
+                        <Button type="button" variant="outline" onClick={() => copyTextToClipboard(getCheckInUrl(selectedEvent.id))}>
                           <Link2 className="mr-2 h-4 w-4" />
                           Copy Desk URL
                         </Button>
@@ -2087,7 +2120,7 @@ function App() {
 
                       <div className="link-row">
                         <div className="link-box">{getCheckOutUrl(selectedEvent.id)}</div>
-                        <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckOutUrl(selectedEvent.id))}>
+                        <Button type="button" variant="outline" onClick={() => copyTextToClipboard(getCheckOutUrl(selectedEvent.id))}>
                           <Link2 className="mr-2 h-4 w-4" />
                           Copy Desk URL
                         </Button>
