@@ -29,7 +29,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.6-reset-per-event-2026-05-25";
+const BUILD_STAMP = "v2.7-participant-lite-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -586,7 +586,13 @@ function App() {
   }
 
   useEffect(() => {
+    // Participant routes only need events (to resolve the event id from the URL).
+    // Loading every registration / check-in / check-out / attendance row on a phone
+    // over a slow connection was hanging the participant page for some operators.
     const unsubEvents = subscribeEvents(setEvents);
+    if (participantMode) {
+      return () => unsubEvents();
+    }
     const unsubRegs = subscribeRegistrations(setRegistrations);
     const unsubIns = subscribeCheckIns(setCheckIns);
     const unsubOuts = subscribeCheckOuts(setCheckOuts);
@@ -598,7 +604,7 @@ function App() {
       unsubOuts();
       unsubAtt();
     };
-  }, []);
+  }, [participantMode]);
 
   useEffect(() => {
     if (!events.length) {
@@ -725,7 +731,7 @@ function App() {
   // Recompute attendance whenever check-in/checkout state changes for the selected event.
   // Lightweight: writes one doc per unique attendee, idempotent.
   useEffect(() => {
-    if (!selectedEventId) return;
+    if (!selectedEventId || participantMode) return;
     let cancelled = false;
     const handle = setTimeout(() => {
       if (cancelled) return;
@@ -735,7 +741,7 @@ function App() {
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [selectedEventId, eventCheckIns.length, eventCheckOuts.length, eventRegistrations.length, selectedEvent?.status]);
+  }, [selectedEventId, eventCheckIns.length, eventCheckOuts.length, eventRegistrations.length, selectedEvent?.status, participantMode]);
 
   // Decrypt attendance rows for the report view.
   useEffect(() => {
