@@ -1,252 +1,85 @@
-# 🌳 Communitree Lead Generation API
+# SCB Event Registration Demo
 
-Fast, secure lead generation system with MongoDB and Google Sheets sync.
+Firebase-first event registration demo for Standard Chartered-style internal campaigns. The current app focuses on the demo story raised in the meeting: QR-based entry, Google-backed storage, duplicate prevention, dashboard visibility, export handoff, and post-event purge.
 
-## ⚡ Features
+## Current Architecture
 
-- **Lightning-fast duplicate detection** - O(1) MongoDB lookups (< 10ms)
-- **Smart duplicate handling** - Shows old data, user confirms replacement
-- **Google Sheets sync** - Auto-sync to spreadsheet for marketing team
-- **Enterprise security** - Input sanitization, rate limiting, XSS protection
-- **Beautiful UI** - Modern, responsive React form
-- **Production-ready** - Full security implementation with monitoring
-
-## 🏗️ Architecture
-
-```
-Frontend (React)  →  Backend (FastAPI)  →  MongoDB
-                           ↓
-                    Google Sheets (sync)
+```text
+scbv1/
+├── frontend/
+│   ├── src/App.js              # Registration, dashboard, and security walkthrough UI
+│   ├── src/lib/firebase.js     # Firebase bootstrapping and runtime mode detection
+│   ├── src/lib/event-store.js  # Firestore/local demo data layer
+│   ├── public/index.html       # Client-facing shell and CSP
+│   └── vercel.json             # Static Vercel deployment config
+├── frontend/api/               # Legacy FastAPI proof-of-concept, no longer primary
+└── README.md
 ```
 
-**Performance:**
-- Old (Google Sheets): 500-1000ms+ with O(n) scanning
-- New (MongoDB): <10ms with O(1) direct lookups
+## What The Demo Shows
 
-## 🚀 Quick Start
+- Event creation with client name, location, retention window, and duplicate rule
+- QR code generation for event-specific registration links
+- Registration flow with duplicate detection and explicit replace confirmation
+- Live dashboard with masked sensitive fields by default
+- CSV export for final handoff to the client
+- Post-event purge flow and `expiresAt` retention tracking for Firestore TTL readiness
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- MongoDB (or MongoDB Atlas account)
-- Google Service Account (for Sheets sync)
+## Data Model
 
-### 1. Clone Repository
-```bash
-git clone https://github.com/YOUR_USERNAME/communitree-leads.git
-cd communitree-leads
-```
+### `events/{eventId}`
 
-### 2. Backend Setup
-```bash
-cd backend
+- Client and event metadata
+- Duplicate control field
+- Retention window in days
+- `createdAt`
+- `expiresAt`
 
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+### `registrations/{eventId__hash}`
 
-# Install dependencies
-pip install -r requirements.txt
+- Event linkage
+- Participant details
+- Masked field variants for dashboard-safe display
+- Revision history for replaced registrations
+- `createdAt`
+- `updatedAt`
+- `expiresAt`
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
+## Storage Modes
 
-# Run backend
-uvicorn server:app --host 0.0.0.0 --port 8001 --reload
-```
+### Firebase mode
 
-### 3. Frontend Setup
+If the Firebase environment variables are configured, the app writes directly to Cloud Firestore from the browser.
+
+### Demo mode
+
+If the Firebase environment variables are missing, the app uses local browser storage so the team can still demo the entire flow without blocking on credentials.
+
+## Local Development
+
 ```bash
 cd frontend
-
-# Install dependencies
-yarn install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with backend URL
-
-# Run frontend
+npm exec --yes yarn@1.22.22 -- install
 yarn start
 ```
 
-### 4. Google Sheets Setup (Optional)
+Open `http://localhost:3000`.
 
-1. Create Google Service Account
-2. Download JSON credentials
-3. Save as `backend/google_credentials.json`
-4. Share your Google Sheet with service account email
-5. Update `SPREADSHEET_ID` and `SHEET_NAME` in `.env`
+## Firebase Configuration
 
-## 📁 Project Structure
+Add the values from a Firebase web app to `frontend/.env`:
 
-```
-communitree-leads/
-├── backend/
-│   ├── server.py              # Main FastAPI application
-│   ├── security.py            # Security utilities
-│   ├── requirements.txt       # Python dependencies
-│   ├── .env.example          # Environment template
-│   └── google_credentials.json (add your own)
-├── frontend/
-│   ├── src/
-│   │   ├── App.js            # Main React component
-│   │   ├── App.css           # Styles
-│   │   └── components/ui/    # Shadcn components
-│   ├── package.json          # Node dependencies
-│   └── .env.example          # Environment template
-├── scripts/
-│   └── security_test.sh      # Security testing script
-├── SECURITY_GUIDE.md         # Complete security documentation
-├── SECURITY_IMPLEMENTATION.md # Implementation details
-├── DEPLOYMENT.md             # Deployment guide
-└── README.md                 # This file
-```
-
-## 🔒 Security Features
-
-✅ **Input Sanitization** - Removes dangerous characters  
-✅ **Rate Limiting** - Prevents spam/DDoS  
-✅ **NoSQL Injection Protection** - Strict validation  
-✅ **XSS Protection** - Security headers  
-✅ **Request Size Limits** - Max 50KB payloads  
-✅ **Anomaly Detection** - Monitors suspicious activity  
-✅ **Error Obfuscation** - No internal info exposed  
-✅ **HTTPS Ready** - TLS/SSL support  
-
-See `SECURITY_GUIDE.md` for complete details.
-
-## 🌐 Deployment
-
-### Option 1: Vercel + Railway (Recommended)
-- **Frontend**: Deploy to Vercel (free)
-- **Backend**: Deploy to Railway (free tier available)
-- **Database**: MongoDB Atlas (free 512MB)
-
-See `DEPLOYMENT.md` for step-by-step instructions.
-
-### Option 2: All-in-One (Railway)
-- Deploy entire stack to Railway
-- Single platform management
-
-### Option 3: Google Cloud / AWS
-- Cloud Run / Lambda for serverless
-- See deployment guide for details
-
-## 🔧 Configuration
-
-### Backend (.env)
 ```bash
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=leads_database
-CORS_ORIGINS=http://localhost:3000
-GOOGLE_SHEETS_ENABLED=true
-SPREADSHEET_ID=your-sheet-id
-SHEET_NAME=Sheet1
-API_KEY=your-api-key-here
+REACT_APP_FIREBASE_API_KEY=...
+REACT_APP_FIREBASE_AUTH_DOMAIN=...
+REACT_APP_FIREBASE_PROJECT_ID=...
+REACT_APP_FIREBASE_STORAGE_BUCKET=...
+REACT_APP_FIREBASE_MESSAGING_SENDER_ID=...
+REACT_APP_FIREBASE_APP_ID=...
 ```
 
-### Frontend (.env)
-```bash
-REACT_APP_BACKEND_URL=http://localhost:8001
-```
+Once these are present, the app switches from demo mode to real Firestore mode automatically.
 
-## 🧪 Testing
+## Deployment
 
-### Run Security Tests
-```bash
-bash scripts/security_test.sh
-```
-
-### Manual API Testing
-```bash
-# Health check
-curl http://localhost:8001/api/
-
-# Check duplicate
-curl -X POST http://localhost:8001/api/check \
-  -H "Content-Type: application/json" \
-  -d '{"leadId":"TEST-001"}'
-
-# Submit lead
-curl -X POST http://localhost:8001/api/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "data": {
-      "leadId":"TEST-001",
-      "email":"test@example.com",
-      "fullName":"Test User",
-      "phone":"+1-555-0000",
-      "company":"Test Co",
-      "orgName":"Testing"
-    },
-    "replace":false
-  }'
-```
-
-## 📊 API Endpoints
-
-| Endpoint | Method | Description | Rate Limit |
-|----------|--------|-------------|------------|
-| `/api/` | GET | Health check | - |
-| `/api/check` | POST | Check duplicate | 30/min |
-| `/api/submit` | POST | Submit lead | 10/min |
-| `/api/lead/{id}` | GET | Get specific lead | 60/min |
-| `/api/leads` | GET | Get all leads (requires API key) | 10/min |
-
-## 🎨 UI/UX
-
-- **Modern design** with Tailwind CSS
-- **Shadcn/UI components** for consistency
-- **Responsive** mobile-friendly layout
-- **Real-time validation** with error messages
-- **Duplicate confirmation modal** with old data preview
-- **Auto-form clearing** after successful submission
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- FastAPI for the excellent Python framework
-- MongoDB for fast NoSQL database
-- React & Tailwind CSS for beautiful UI
-- Shadcn/UI for component library
-- Google Sheets API for data sync
-
-## 📞 Support
-
-- **Documentation**: See `/docs` folder
-- **Security**: Read `SECURITY_GUIDE.md`
-- **Deployment**: Follow `DEPLOYMENT.md`
-- **Issues**: Open GitHub issue
-
-## 🔄 Updates
-
-**Version 2.0** (March 2026)
-- ✅ Full security implementation
-- ✅ Rate limiting
-- ✅ Input sanitization
-- ✅ Enhanced validation
-- ✅ Anomaly detection
-- ✅ Production-ready
-
-**Version 1.0** (March 2026)
-- ✅ Initial release
-- ✅ MongoDB integration
-- ✅ Google Sheets sync
-- ✅ Duplicate detection
-
----
-
-**Made with ❤️ for fast, secure lead generation**
+Deploy the `frontend/` app as a static Vercel project or serve the built output from the client-approved domain. The current implementation no longer depends on the old FastAPI endpoint for the main flow.

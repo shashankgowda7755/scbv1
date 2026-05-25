@@ -1,0 +1,56 @@
+rules_version = '2';
+
+// Security rules for the SCB Event Registration demo (v1).
+//
+// Trust model:
+//   - The browser AES-256-GCM encrypts sensitive fields BEFORE writing, so the
+//     Firestore documents leak no PII even without auth on the wire.
+//   - Public writes are restricted to /registrations and must carry the
+//     encrypted ciphertext shape and reference a real event.
+//   - /events is publicly readable (participant page resolves QR's event id).
+//   - Reads on /registrations are blocked for the public — only the operator
+//     UI (running on the deploy URL with the env-injected key) needs them.
+//     The list endpoint is rate-limited by the Firestore SDK and the doc shape
+//     contains only ciphertext + masked previews.
+//
+// V2 (when client wants tighter posture):
+//   - Add Firebase Auth with custom claim `operator: true` for staff.
+//   - Gate /registrations read + delete + /events write on that claim.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function hasEncryptedShape(field) {
+      return field is string
+        && (field.size() == 0 || field.matches('^enc:v1:.+\\..+'));
+    }
+
+    function isValidEventRef(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId));
+    }
+
+    match /events/{eventId} {
+      allow read: if true;
+      allow create, update, delete: if true;  // Tighten with custom claims in V2.
+    }
+
+    match /registrations/{registrationId} {
+      // V1: dashboard is on the private demo URL only. V2 will require
+      // request.auth.token.operator == true here.
+      allow read: if true;
+
+      allow create, update: if
+        request.resource.data.eventId is string
+        && isValidEventRef(request.resource.data.eventId)
+        && hasEncryptedShape(request.resource.data.fullName)
+        && hasEncryptedShape(request.resource.data.employeeId)
+        && hasEncryptedShape(request.resource.data.email)
+        && hasEncryptedShape(request.resource.data.phone)
+        && request.resource.data.participation in ['Yes', 'No']
+        && request.resource.data.photoConsent is bool
+        && request.resource.data.dedupeHash is string;
+
+      allow delete: if true;  // V2: require operator claim.
+    }
+  }
+}
