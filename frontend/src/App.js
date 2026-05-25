@@ -22,8 +22,10 @@ import {
   decryptRegistrations,
   decryptRegistration,
   decryptAttendanceRow,
+  probeFirestore,
   STATUS_LABEL,
 } from "@/lib/event-store";
+import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -380,7 +382,8 @@ function ParticipantCheckOut({ event, form, setForm, result, busy, onSubmit }) {
 }
 
 function App() {
-  const storeMode = getStoreMode();
+  const [storeMode, setStoreMode] = useState(getStoreMode());
+  const [fallbackBanner, setFallbackBanner] = useState("");
   const participantMode = getParticipantMode();
   const [events, setEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
@@ -426,6 +429,17 @@ function App() {
     getKeyFingerprint()
       .then(setKeyFingerprint)
       .catch(() => setKeyFingerprint("unavailable"));
+    probeFirestore().then((mode) => {
+      setStoreMode(mode);
+      if (mode === "demo" && getFallbackReason()) {
+        setFallbackBanner(getFallbackReason());
+      }
+    });
+    const offMode = onFirebaseModeChange(({ mode, reason }) => {
+      setStoreMode(mode);
+      if (mode === "demo") setFallbackBanner(reason || "Switched to local store");
+    });
+    return () => offMode();
   }, []);
 
   useEffect(() => {
@@ -1322,6 +1336,16 @@ function App() {
               <div className="scb-stat"><span>This Event</span><strong>{selectedEvent ? eventRegistrations.length : 0}</strong></div>
             </div>
           </header>
+
+          {fallbackBanner && (
+            <Alert className="status-alert border-amber-300 bg-amber-50">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              <AlertDescription className="text-amber-900">
+                Using local store. {fallbackBanner}. Data lives in this browser only. To switch back to Firestore, deploy rules then{" "}
+                <button type="button" className="underline" onClick={reenableFirestoreMode}>reload</button>.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {message.text && (
             <Alert className={message.type === "error" ? "status-alert border-red-300 bg-red-50" : "status-alert border-emerald-300 bg-emerald-50"}>

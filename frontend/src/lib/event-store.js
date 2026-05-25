@@ -11,7 +11,7 @@ import {
   where,
 } from "firebase/firestore";
 
-import { firebaseMode, firestoreDb } from "@/lib/firebase";
+import { getFirebaseMode, fallbackToDemoMode, firestoreDb } from "@/lib/firebase";
 import {
   ENCRYPTED_FIELDS,
   decryptString,
@@ -393,7 +393,7 @@ async function saveRegistrationInDemo({ event, formData, replace }) {
 }
 
 async function deleteEventCascade(eventId) {
-  if (firebaseMode === "firebase") {
+  if (getFirebaseMode() === "firebase") {
     await deleteDoc(doc(firestoreDb, "events", eventId));
     for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
       const snap = await getDocs(collection(firestoreDb, sub));
@@ -414,14 +414,23 @@ async function deleteEventCascade(eventId) {
   notifyDemoListeners();
 }
 
-function subscribeToFirestoreCollection(collectionName, callback, sortField, filter) {
+function subscribeToFirestoreCollection(collectionName, callback, sortField, filter, onFallback) {
   const ref = filter
     ? query(collection(firestoreDb, collectionName), where(filter.field, "==", filter.value))
     : collection(firestoreDb, collectionName);
-  return onSnapshot(ref, (snapshot) => {
-    const records = snapshot.docs.map(normalizeFirestoreDoc);
-    callback(sortByNewest(records, sortField));
-  });
+  return onSnapshot(
+    ref,
+    (snapshot) => {
+      const records = snapshot.docs.map(normalizeFirestoreDoc);
+      callback(sortByNewest(records, sortField));
+    },
+    (error) => {
+      if (error?.code === "permission-denied" || error?.code === "unavailable") {
+        fallbackToDemoMode(`Firestore ${error.code}: rules not deployed or offline`);
+        if (onFallback) onFallback();
+      }
+    },
+  );
 }
 
 function subscribeToDemoCollection(type, callback, sortField, filter) {
@@ -441,14 +450,55 @@ function subscribeToDemoCollection(type, callback, sortField, filter) {
 
 function subscribeCollection(name, callback, filter) {
   const sortField = SORT_FIELD[name];
-  if (firebaseMode === "firebase") {
-    return subscribeToFirestoreCollection(name, callback, sortField, filter);
+  let firestoreUnsub = null;
+  let demoUnsub = null;
+  let usingDemo = false;
+  function switchToDemo() {
+    if (usingDemo) return;
+    usingDemo = true;
+    if (firestoreUnsub) {
+      try { firestoreUnsub(); } catch {}
+      firestoreUnsub = null;
+    }
+    demoUnsub = subscribeToDemoCollection(name, callback, sortField, filter);
   }
-  return subscribeToDemoCollection(name, callback, sortField, filter);
+  if (getFirebaseMode() === "firebase") {
+    firestoreUnsub = subscribeToFirestoreCollection(name, callback, sortField, filter, switchToDemo);
+  } else {
+    switchToDemo();
+  }
+  return () => {
+    if (firestoreUnsub) try { firestoreUnsub(); } catch {}
+    if (demoUnsub) try { demoUnsub(); } catch {}
+  };
+}
+
+async function safeFirestoreWrite(fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    if (error?.code === "permission-denied" || error?.code === "unavailable") {
+      fallbackToDemoMode(`Firestore ${error.code} on write: rules not deployed`);
+      return { __fellBackToDemo: true };
+    }
+    throw error;
+  }
 }
 
 export function getStoreMode() {
-  return firebaseMode;
+  return getFirebaseMode();
+}
+
+export async function probeFirestore() {
+  if (getFirebaseMode() !== "firebase") return getFirebaseMode();
+  try {
+    await getDocs(collection(firestoreDb, "events"));
+  } catch (error) {
+    if (error?.code === "permission-denied" || error?.code === "unavailable") {
+      fallbackToDemoMode(`Firestore ${error.code}: rules not deployed`);
+    }
+  }
+  return getFirebaseMode();
 }
 
 export function subscribeEvents(callback) {
@@ -472,15 +522,19 @@ export function subscribeAttendance(callback, eventId) {
 }
 
 export async function createEvent(input) {
-  if (firebaseMode === "firebase") {
-    return createEventInFirestore(input);
+  if (getFirebaseMode() === "firebase") {
+    const r = await safeFirestoreWrite(() => createEventInFirestore(input));
+    if (r && r.__fellBackToDemo) return createEventInDemo(input);
+    return r;
   }
   return createEventInDemo(input);
 }
 
 export async function saveRegistration(payload) {
-  if (firebaseMode === "firebase") {
-    return saveRegistrationInFirestore(payload);
+  if (getFirebaseMode() === "firebase") {
+    const r = await safeFirestoreWrite(() => saveRegistrationInFirestore(payload));
+    if (r && r.__fellBackToDemo) return saveRegistrationInDemo(payload);
+    return r;
   }
   return saveRegistrationInDemo(payload);
 }
@@ -493,7 +547,7 @@ export async function setEventStatus(eventId, status) {
   if (!["active", "closed"].includes(status)) {
     throw new Error(`Invalid event status: ${status}`);
   }
-  if (firebaseMode === "firebase") {
+  if (getFirebaseMode() === "firebase") {
     await updateDoc(doc(firestoreDb, "events", eventId), { status });
   } else {
     const store = loadDemoStore();
@@ -518,7 +572,7 @@ async function findRegistrationByUniqueId(event, uniqueId) {
   const dedupeValue = dedupeValueOf(event.duplicateField, uniqueId);
   const dedupeHash = await hashDedupeValue(event.id, dedupeValue);
   const recordId = `${event.id}__${dedupeHash}`;
-  if (firebaseMode === "firebase") {
+  if (getFirebaseMode() === "firebase") {
     const snap = await getDoc(doc(firestoreDb, "registrations", recordId));
     return snap.exists() ? { record: normalizeFirestoreDoc(snap), dedupeHash } : { record: null, dedupeHash };
   }
@@ -533,7 +587,7 @@ export async function lookupRegistration(event, uniqueId) {
 }
 
 async function readEventDoc(eventId) {
-  if (firebaseMode === "firebase") {
+  if (getFirebaseMode() === "firebase") {
     const snap = await getDoc(doc(firestoreDb, "events", eventId));
     return snap.exists() ? normalizeFirestoreDoc(snap) : null;
   }
@@ -542,7 +596,7 @@ async function readEventDoc(eventId) {
 }
 
 async function readCollectionDoc(name, id) {
-  if (firebaseMode === "firebase") {
+  if (getFirebaseMode() === "firebase") {
     const snap = await getDoc(doc(firestoreDb, name, id));
     return snap.exists() ? normalizeFirestoreDoc(snap) : null;
   }
@@ -551,28 +605,40 @@ async function readCollectionDoc(name, id) {
 }
 
 async function writeCollectionDoc(name, record) {
-  if (firebaseMode === "firebase") {
-    await setDoc(doc(firestoreDb, name, record.id), record);
-  } else {
+  function writeDemo() {
     const store = loadDemoStore();
     store[name] = sortByNewest(upsertInArray(store[name] || [], record), SORT_FIELD[name]);
     saveDemoStore(store);
     notifyDemoListeners();
   }
+  if (getFirebaseMode() === "firebase") {
+    const r = await safeFirestoreWrite(() => setDoc(doc(firestoreDb, name, record.id), record));
+    if (r && r.__fellBackToDemo) writeDemo();
+    return;
+  }
+  writeDemo();
 }
 
 async function listCollectionByEvent(name, eventId) {
-  if (firebaseMode === "firebase") {
-    const q = query(collection(firestoreDb, name), where("eventId", "==", eventId));
-    const snap = await getDocs(q);
-    return snap.docs.map(normalizeFirestoreDoc);
+  if (getFirebaseMode() === "firebase") {
+    try {
+      const q = query(collection(firestoreDb, name), where("eventId", "==", eventId));
+      const snap = await getDocs(q);
+      return snap.docs.map(normalizeFirestoreDoc);
+    } catch (e) {
+      if (e?.code === "permission-denied" || e?.code === "unavailable") {
+        fallbackToDemoMode(`Firestore ${e.code} on read`);
+      } else {
+        throw e;
+      }
+    }
   }
   const store = loadDemoStore();
   return (store[name] || []).filter((item) => item.eventId === eventId);
 }
 
 async function deleteCollectionDoc(name, id) {
-  if (firebaseMode === "firebase") {
+  if (getFirebaseMode() === "firebase") {
     await deleteDoc(doc(firestoreDb, name, id));
     return;
   }

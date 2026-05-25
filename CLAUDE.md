@@ -32,11 +32,13 @@ Single source of truth for this repo. Read this first whenever resuming work.
 - Firestore rules shape-validate writes (rejects non-ciphertext shapes).
 - Firestore TTL on `expiresAt` for automatic retention purge.
 
-### Stubbed (V2, roadmap cards live in sidebar)
-- **Form Builder** — no-code per-event form editor.
-- **Check-In** — venue desk single-field form with walk-in capture.
-- **Checkout** — exit form + attendance status engine.
-- **Reports** — post-event report with status flags, CSV + PDF.
+### V2 backend wired in `lib/event-store.js` (UI pages still stubbed)
+- **Form Builder** — no-code per-event form editor. UI = stub.
+- **Check-In** — `saveCheckIn({ event, uniqueId, fullName })`. Lookups via `lookupRegistration`. Walk-in capture supported. Duplicate guard. UI = stub.
+- **Checkout** — `saveCheckOut({ event, uniqueId, fullName })`. Status branches: complete / reg-checkout-no-checkin / walkin-complete / walkin-checkout. UI = stub.
+- **Attendance engine** — `classifyAttendance({ registration, checkIn, checkOut })` returns one of 8 codes. `computeAttendance(eventId)` rolls up + persists `/attendance/{id}` docs. Auto-runs on `closeEvent(id)`.
+- **Event lifecycle** — `setEventStatus(eventId, "active" | "closed")`, `closeEvent`, `reopenEvent`. Rules block writes to closed events.
+- **Reports** — backend ready (data in `/attendance`). UI = stub.
 
 ### Blocked
 - **GitHub push** — local git auth is `artforawarenessofficial-blip`, no write perm on `shashankgowda7755/scbv1`. Branch `codex/setup-onboarding` has 1 unpushed commit.
@@ -144,6 +146,15 @@ SCB Event Platform
 
 Code: `frontend/src/lib/crypto.js`.
 
+### V2 — `checkins` / `checkouts` / `attendance` also encrypt PII
+
+- `checkins/{eventId__hash}` and `checkouts/{eventId__hash}` store `uniqueId` and `fullName` as `enc:v1:...` ciphertext.
+- `attendance/{eventId__hash}` rolls up timestamps + status + the same encrypted fields.
+- Status codes (Module 6 of the spec):
+  `COMPLETE | REG_CHECKIN | REG_ONLY | REG_CHECKOUT | WALKIN_COMPLETE | WALKIN_CHECKIN | WALKIN_CHECKOUT | NO_SHOW`
+  Implemented in `classifyAttendance()`; mapped to human labels via `STATUS_LABEL`.
+- `computeAttendance(eventId)` joins all 3 logs by `dedupeHash`, persists rows to `/attendance`, and removes stale rows.
+
 ---
 
 ## 8. Data Model
@@ -158,6 +169,10 @@ Code: `frontend/src/lib/crypto.js`.
   createdAt: Timestamp, expiresAt: Timestamp
 }
 ```
+
+### Collections (V2)
+
+`events`, `registrations`, `checkins`, `checkouts`, `attendance` — all in Firestore. All cascade-delete on `deleteEvent(id)`. All carry `expiresAt` for Firestore TTL.
 
 ### `registrations/{eventId}__{sha256-hash}`
 ```
@@ -368,7 +383,10 @@ scbv1/
 - [ ] Push `codex/setup-onboarding` to `shashankgowda7755/scbv1` (blocked on git auth).
 - [ ] Promote latest local-built Vercel deploy to `scbv1-ehbx.vercel.app` alias (blocked on Vercel BLOCKED state).
 - [ ] User to review `TEXT_INVENTORY.md` and provide copy edits.
+- [x] V2 backend wired in `event-store.js` (checkins, checkouts, attendance collections, lifecycle, status engine).
+- [ ] Wire Check-In UI page (consume `saveCheckIn`, show registered/walk-in confirmation).
+- [ ] Wire Checkout UI page (consume `saveCheckOut`).
+- [ ] Wire Reports UI page (consume `computeAttendance` + `subscribeAttendance`, render status counts + per-attendee table, CSV/PDF export).
 - [ ] Wire Form Builder (V2).
-- [ ] Wire Check-In + Checkout + Attendance Engine (V2).
-- [ ] Wire Reports CSV + PDF (V2).
+- [ ] Add `Close Event` button on Dashboard (triggers `closeEvent` → auto-runs attendance engine).
 - [ ] Add Firebase Auth + operator claims (V2 hardening).
