@@ -91,3 +91,5 @@ dump/
 *.env
 *.env.*
 .gstack/
+frontend/api/pyproject.toml
+frontend/api/uv.lock
