@@ -20,19 +20,20 @@ const requiredConfig = [
 
 const FORCE_DEMO_KEY = "SCB_FORCE_DEMO";
 
-function readForceDemo() {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(FORCE_DEMO_KEY) === "1";
-}
-
 function writeForceDemo(on) {
   if (typeof window === "undefined") return;
   if (on) window.localStorage.setItem(FORCE_DEMO_KEY, "1");
   else window.localStorage.removeItem(FORCE_DEMO_KEY);
 }
 
+// Demo mode disabled in production. Only entered if Firebase env vars are missing.
+// Stale SCB_FORCE_DEMO flags from prior fallback runs are explicitly cleared on load.
+if (typeof window !== "undefined") {
+  try { window.localStorage.removeItem(FORCE_DEMO_KEY); } catch {}
+}
+
 const configOk = requiredConfig.every(Boolean);
-let _mode = !configOk || readForceDemo() ? "demo" : "firebase";
+let _mode = configOk ? "firebase" : "demo";
 let _fallbackReason = "";
 const listeners = new Set();
 
@@ -52,14 +53,12 @@ export function isDemoMode() {
   return _mode === "demo";
 }
 export function fallbackToDemoMode(reason) {
-  if (_mode === "demo") return;
-  _mode = "demo";
+  // Demo fallback disabled. Surface the underlying Firestore error to the caller
+  // instead of silently dropping into a local-only mode that confuses operators.
+  // The reason is still recorded so the UI can show a banner if it wants.
   _fallbackReason = reason || "Firestore unavailable";
-  writeForceDemo(true);
   listeners.forEach((cb) => {
-    try {
-      cb({ mode: _mode, reason: _fallbackReason });
-    } catch {}
+    try { cb({ mode: _mode, reason: _fallbackReason }); } catch {}
   });
 }
 export function reenableFirestoreMode() {

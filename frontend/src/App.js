@@ -28,7 +28,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.3-allowlist-2026-05-25";
+const BUILD_STAMP = "v2.4-no-demo-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
