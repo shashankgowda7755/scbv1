@@ -134,6 +134,15 @@ function buildEventRecord(input) {
     registrationEnabled: input.registrationEnabled !== false,
     checkInEnabled: input.checkInEnabled !== false,
     checkOutEnabled: input.checkOutEnabled !== false,
+    // Per-event participant-form schema. `description` is the welcome copy
+    // shown above the form; `uniqueIdLabel` lets admin rename "Bank ID" (the
+    // dedupe field always exists, this just changes the label); `formFields`
+    // is an array of additional inputs the admin adds via Form Builder.
+    // Existing events without these fields fall back to legacy defaults at
+    // render time.
+    description: normalizeString(input.description),
+    uniqueIdLabel: normalizeString(input.uniqueIdLabel) || "Bank ID",
+    formFields: Array.isArray(input.formFields) ? input.formFields : [],
     createdAt,
     expiresAt: buildExpiresAt(input.eventDate, retentionDays),
   };
@@ -176,6 +185,15 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
     city: normalizeString(formData.city),
     participation: formData.participation === "No" ? "No" : "Yes",
     photoConsent: Boolean(formData.photoConsent),
+    customData:
+      formData.customData && typeof formData.customData === "object"
+        ? Object.fromEntries(
+            Object.entries(formData.customData).map(([k, v]) => [
+              k,
+              typeof v === "string" ? normalizeString(v) : v,
+            ]),
+          )
+        : {},
     consent: Boolean(formData.consent),
     maskedFullName: buildMaskedName(plainData.fullName),
     maskedEmail: buildMaskedEmail(plainData.email),
@@ -608,6 +626,54 @@ export async function setEventStatus(eventId, status) {
   }
   if (status === "closed") {
     await computeAttendance(eventId);
+  }
+}
+
+// Partial update for event metadata + form schema. Whitelisted keys only;
+// status/id/createdAt/expiresAt are managed elsewhere.
+const EVENT_EDITABLE_KEYS = [
+  "clientName",
+  "title",
+  "location",
+  "eventDate",
+  "duplicateField",
+  "retentionDays",
+  "notes",
+  "description",
+  "uniqueIdLabel",
+  "formFields",
+  "registrationEnabled",
+  "checkInEnabled",
+  "checkOutEnabled",
+];
+
+export async function updateEvent(eventId, patch) {
+  const safePatch = {};
+  for (const key of EVENT_EDITABLE_KEYS) {
+    if (patch[key] === undefined) continue;
+    if (key === "retentionDays") {
+      safePatch[key] = Number(patch[key]) || 90;
+    } else if (key === "formFields") {
+      safePatch[key] = Array.isArray(patch[key]) ? patch[key] : [];
+    } else if (key === "uniqueIdLabel") {
+      safePatch[key] = normalizeString(patch[key]) || "Bank ID";
+    } else if (typeof patch[key] === "string") {
+      safePatch[key] = normalizeString(patch[key]);
+    } else {
+      safePatch[key] = patch[key];
+    }
+  }
+  if (Object.keys(safePatch).length === 0) return;
+
+  if (getFirebaseMode() === "firebase") {
+    await updateDoc(doc(firestoreDb, "events", eventId), safePatch);
+  } else {
+    const store = loadDemoStore();
+    store.events = store.events.map((item) =>
+      item.id === eventId ? { ...item, ...safePatch } : item,
+    );
+    saveDemoStore(store);
+    notifyDemoListeners();
   }
 }
 

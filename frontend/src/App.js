@@ -11,6 +11,7 @@ import {
   subscribeCheckOuts,
   subscribeAttendance,
   createEvent,
+  updateEvent,
   deleteEvent,
   resetEventData,
   setEventFormEnabled,
@@ -61,6 +62,7 @@ const registrationDefaults = {
   participation: "Yes",
   photoConsent: true,
   consent: true,
+  customData: {},
 };
 
 const eventDefaults = {
@@ -72,6 +74,44 @@ const eventDefaults = {
   retentionDays: 90,
   notes:
     "Volunteers design Quiz Calendars for students. Bank ID = duplicate key. Photo consent captured per participant.",
+};
+
+const FIELD_TYPES = [
+  { value: "text", label: "Short text" },
+  { value: "email", label: "Email" },
+  { value: "phone", label: "Phone" },
+  { value: "radio", label: "Yes / No radio" },
+  { value: "dropdown", label: "Dropdown" },
+  { value: "checkbox", label: "Checkbox" },
+];
+
+const FIELD_TYPES_WITH_OPTIONS = ["radio", "dropdown"];
+
+function makeFieldKey(label, existingKeys) {
+  const base = String(label || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32) || "field";
+  let key = base;
+  let suffix = 2;
+  while (existingKeys.includes(key)) {
+    key = `${base}_${suffix++}`;
+  }
+  return key;
+}
+
+const builderDefaults = {
+  clientName: "",
+  title: "",
+  location: "",
+  eventDate: new Date().toISOString().slice(0, 10),
+  duplicateField: "employeeId",
+  retentionDays: 90,
+  description:
+    "Welcome!\n\nThank you for being part of this initiative. Please fill out the form below to mark your attendance.",
+  uniqueIdLabel: "Bank ID",
+  formFields: [],
 };
 
 function statusPillClass(code) {
@@ -215,12 +255,37 @@ function validateRegistrationForm(event, formData) {
     return "Participant name is required.";
   }
 
+  const uidLabel = event.uniqueIdLabel || "Bank ID";
+
   if (!formData.employeeId.trim()) {
-    return "Bank ID is required.";
+    return `${uidLabel} is required.`;
   }
 
   if (!/^[A-Z0-9._-]{3,}$/i.test(formData.employeeId.trim())) {
-    return "Bank ID must be at least 3 characters and use letters, numbers, dots, hyphens, or underscores.";
+    return `${uidLabel} must be at least 3 characters and use letters, numbers, dots, hyphens, or underscores.`;
+  }
+
+  // Validate required custom fields per event.formFields schema.
+  const customFields = Array.isArray(event.formFields) ? event.formFields : [];
+  const customData = formData.customData || {};
+  for (const fld of customFields) {
+    const v = customData[fld.key];
+    const isEmpty =
+      v === undefined ||
+      v === null ||
+      (typeof v === "string" && !v.trim()) ||
+      (fld.type === "checkbox" && v === false);
+    if (fld.required && isEmpty) {
+      return `${fld.label} is required.`;
+    }
+    if (!isEmpty && typeof v === "string") {
+      if (fld.type === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())) {
+        return `${fld.label}: enter a valid email address.`;
+      }
+      if (fld.type === "phone" && !/^[0-9+\-()\s]{7,20}$/.test(v.trim())) {
+        return `${fld.label}: enter a valid phone number.`;
+      }
+    }
   }
 
   // Email / phone / department / city are optional for the Quiz Calendar form
@@ -523,6 +588,10 @@ function App() {
   };
   const [registrationForm, setRegistrationForm] = useState(registrationDefaults);
   const [eventForm, setEventForm] = useState(eventDefaults);
+  const [builderForm, setBuilderForm] = useState(builderDefaults);
+  const [builderMode, setBuilderMode] = useState("create"); // "create" | "edit"
+  const [builderEventId, setBuilderEventId] = useState(null);
+  const [savingBuilder, setSavingBuilder] = useState(false);
   const [message, setMessage] = useState({ type: "", text: "" });
   const [submitting, setSubmitting] = useState(false);
   const [creatingEvent, setCreatingEvent] = useState(false);
@@ -1003,6 +1072,10 @@ function App() {
   async function handleToggleForm(eventArg, formKey) {
     const ev = eventArg || selectedEvent;
     if (!ev) return;
+    if ((ev.status || "active") === "closed") {
+      setMessage({ type: "error", text: `"${ev.title}" is inactive. Activate the event first; all forms then follow.` });
+      return;
+    }
     const field = formKey === "registration" ? "registrationEnabled"
       : formKey === "checkIn" ? "checkInEnabled"
       : formKey === "checkOut" ? "checkOutEnabled" : null;
@@ -1324,6 +1397,147 @@ function App() {
       });
   }
 
+  // ----- Form Builder -----
+
+  function startBuilderCreate() {
+    setBuilderMode("create");
+    setBuilderEventId(null);
+    setBuilderForm(builderDefaults);
+    setMessage({ type: "", text: "" });
+    setActiveTab("formbuilder");
+  }
+
+  function startBuilderEdit(ev) {
+    if (!ev) return;
+    setBuilderMode("edit");
+    setBuilderEventId(ev.id);
+    setBuilderForm({
+      clientName: ev.clientName || "",
+      title: ev.title || "",
+      location: ev.location || "",
+      eventDate: ev.eventDate || builderDefaults.eventDate,
+      duplicateField: ev.duplicateField || "employeeId",
+      retentionDays: ev.retentionDays || 90,
+      description: ev.description || "",
+      uniqueIdLabel: ev.uniqueIdLabel || "Bank ID",
+      formFields: Array.isArray(ev.formFields) ? ev.formFields : [],
+    });
+    setMessage({ type: "", text: "" });
+    setActiveTab("formbuilder");
+  }
+
+  function updateBuilderField(name, value) {
+    setBuilderForm((curr) => ({ ...curr, [name]: value }));
+    setMessage({ type: "", text: "" });
+  }
+
+  function addBuilderCustomField() {
+    setBuilderForm((curr) => {
+      const existingKeys = curr.formFields.map((f) => f.key);
+      const newField = {
+        key: makeFieldKey("question_" + (curr.formFields.length + 1), existingKeys),
+        label: "",
+        type: "text",
+        required: false,
+        options: [],
+      };
+      return { ...curr, formFields: [...curr.formFields, newField] };
+    });
+  }
+
+  function updateBuilderCustomField(index, patch) {
+    setBuilderForm((curr) => {
+      const next = curr.formFields.map((field, i) => {
+        if (i !== index) return field;
+        const merged = { ...field, ...patch };
+        // Auto-regen key when label changes if key was auto-derived
+        if (patch.label !== undefined) {
+          const existingKeys = curr.formFields
+            .filter((_, j) => j !== index)
+            .map((f) => f.key);
+          merged.key = makeFieldKey(patch.label, existingKeys);
+        }
+        // Reset options when type changes away from a list-typed field
+        if (patch.type !== undefined && !FIELD_TYPES_WITH_OPTIONS.includes(patch.type)) {
+          merged.options = [];
+        }
+        return merged;
+      });
+      return { ...curr, formFields: next };
+    });
+  }
+
+  function removeBuilderCustomField(index) {
+    setBuilderForm((curr) => ({
+      ...curr,
+      formFields: curr.formFields.filter((_, i) => i !== index),
+    }));
+  }
+
+  function moveBuilderCustomField(index, direction) {
+    setBuilderForm((curr) => {
+      const next = [...curr.formFields];
+      const target = index + direction;
+      if (target < 0 || target >= next.length) return curr;
+      [next[index], next[target]] = [next[target], next[index]];
+      return { ...curr, formFields: next };
+    });
+  }
+
+  function validateBuilderForm() {
+    const f = builderForm;
+    if (!f.clientName.trim()) return "Client name is required.";
+    if (!f.title.trim()) return "Event title is required.";
+    if (!f.location.trim()) return "Location is required.";
+    if (!f.eventDate) return "Event date is required.";
+    if (!f.uniqueIdLabel.trim()) return "Unique ID label is required.";
+    for (let i = 0; i < f.formFields.length; i += 1) {
+      const fld = f.formFields[i];
+      if (!fld.label.trim()) return `Field ${i + 1}: label is required.`;
+      if (FIELD_TYPES_WITH_OPTIONS.includes(fld.type) && (!fld.options || fld.options.length === 0)) {
+        return `Field "${fld.label}": add at least one option.`;
+      }
+    }
+    return null;
+  }
+
+  async function handleSaveBuilder(e) {
+    e?.preventDefault?.();
+    const err = validateBuilderForm();
+    if (err) {
+      setMessage({ type: "error", text: err });
+      return;
+    }
+    setSavingBuilder(true);
+    try {
+      const payload = {
+        clientName: builderForm.clientName,
+        title: builderForm.title,
+        location: builderForm.location,
+        eventDate: builderForm.eventDate,
+        duplicateField: builderForm.duplicateField,
+        retentionDays: builderForm.retentionDays,
+        description: builderForm.description,
+        uniqueIdLabel: builderForm.uniqueIdLabel,
+        formFields: builderForm.formFields,
+      };
+      if (builderMode === "edit" && builderEventId) {
+        await updateEvent(builderEventId, payload);
+        setMessage({ type: "success", text: `"${builderForm.title}" updated.` });
+        setActiveTab("events");
+      } else {
+        const created = await createEvent(payload);
+        setSelectedEventId(created.id);
+        setMessage({ type: "success", text: `"${created.title}" created. Share the QR to start collecting registrations.` });
+        setActiveTab("qrshare");
+      }
+    } catch (error) {
+      setMessage({ type: "error", text: "Unable to save right now. Check the connection and try again." });
+    } finally {
+      setSavingBuilder(false);
+    }
+  }
+
   const participantBlock = (() => {
     if (!participantMode) return null;
     // Loading: events not arrived yet, wait until subscribeEvents fires.
@@ -1407,16 +1621,35 @@ function App() {
   }
 
   if (participantMode === "register") {
+    const uniqueIdLabel = selectedEvent?.uniqueIdLabel || "Bank ID";
+    const description = selectedEvent?.description || "";
+    const customFields = Array.isArray(selectedEvent?.formFields) ? selectedEvent.formFields : [];
+    const customData = registrationForm.customData || {};
+    const setCustom = (key, value) => {
+      updateRegistrationField("customData", { ...customData, [key]: value });
+    };
+    const descParas = description
+      ? description.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean)
+      : [];
+
     return (
       <div className="gform-page">
         <main className="gform-shell">
           <div className="gform-header">
-            <h1>{selectedEvent ? selectedEvent.title : "CSR Activity Chennai - Quiz Calendar Creation"}</h1>
-            <p className="gform-lead"><strong>Welcome to the Quiz Calendar Creation!</strong></p>
-            <p>Thank you for being part of this creative initiative!</p>
-            <p>We will be designing Quiz calendars to help students create their own calendar while learning about the important dates and events in each month.</p>
-            <p>Your creativity will make these important days come alive for young learners!</p>
-            <p>Please fill out the form below to mark your attendance.</p>
+            <h1>{selectedEvent ? selectedEvent.title : "Event Registration"}</h1>
+            {descParas.length > 0
+              ? descParas.map((para, i) => (
+                  <p key={i} className={i === 0 ? "gform-lead" : ""}>
+                    {i === 0 ? <strong>{para}</strong> : para}
+                  </p>
+                ))
+              : (
+                <>
+                  <p className="gform-lead"><strong>Welcome!</strong></p>
+                  <p>Please fill out the form below to mark your attendance.</p>
+                </>
+              )
+            }
             {selectedEvent && (
               <p className="gform-meta">
                 <strong>Date:</strong> {formatDate(selectedEvent.eventDate)}<br />
@@ -1445,7 +1678,7 @@ function App() {
             </div>
 
             <div className="gform-q">
-              <label htmlFor="p-employeeId">Bank ID <span className="gform-star">*</span></label>
+              <label htmlFor="p-employeeId">{uniqueIdLabel} <span className="gform-star">*</span></label>
               <input
                 id="p-employeeId"
                 className="gform-input"
@@ -1455,23 +1688,49 @@ function App() {
               />
             </div>
 
-            <div className="gform-q">
-              <label>Participation <span className="gform-star">*</span></label>
-              <div className="gform-radio-group">
-                {participationOptions.map((option) => (
-                  <label key={option} className="gform-radio">
-                    <input
-                      type="radio"
-                      name="participation"
-                      value={option}
-                      checked={registrationForm.participation === option}
-                      onChange={() => updateRegistrationField("participation", option)}
-                    />
-                    <span>{option}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
+            {customFields.map((fld) => {
+              const v = customData[fld.key] ?? (fld.type === "checkbox" ? false : "");
+              const inputId = `p-custom-${fld.key}`;
+              const star = fld.required ? <span className="gform-star">*</span> : null;
+              return (
+                <div className="gform-q" key={fld.key}>
+                  <label htmlFor={inputId}>{fld.label} {star}</label>
+                  {fld.type === "text" && (
+                    <input id={inputId} className="gform-input" placeholder="Your answer" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
+                  )}
+                  {fld.type === "email" && (
+                    <input id={inputId} type="email" className="gform-input" placeholder="name@example.com" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
+                  )}
+                  {fld.type === "phone" && (
+                    <input id={inputId} type="tel" className="gform-input" placeholder="+91 98765 43210" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
+                  )}
+                  {fld.type === "radio" && (
+                    <div className="gform-radio-group">
+                      {(fld.options && fld.options.length ? fld.options : ["Yes", "No"]).map((opt) => (
+                        <label key={opt} className="gform-radio">
+                          <input type="radio" name={`custom-${fld.key}`} value={opt} checked={v === opt} onChange={() => setCustom(fld.key, opt)} />
+                          <span>{opt}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  {fld.type === "dropdown" && (
+                    <select id={inputId} className="gform-input gform-select" value={v} onChange={(e) => setCustom(fld.key, e.target.value)}>
+                      <option value="">Choose…</option>
+                      {(fld.options || []).map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  )}
+                  {fld.type === "checkbox" && (
+                    <label className="gform-radio">
+                      <input type="checkbox" checked={!!v} onChange={(e) => setCustom(fld.key, e.target.checked)} />
+                      <span>Yes</span>
+                    </label>
+                  )}
+                </div>
+              );
+            })}
 
             <div className="gform-q">
               <p className="gform-quote">"By registering for this event, you consent to processing and usage of your photos and videos for event management and internal communication purposes."</p>
@@ -1986,15 +2245,162 @@ function App() {
             <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
-                  <CardTitle>Form Builder</CardTitle>
+                  <CardTitle>{builderMode === "edit" ? "Edit Event" : "New Event"}</CardTitle>
                   <CardDescription>
-                    No-code editor to create the Registration, Check-In, and Checkout forms per event. Coming next.
+                    {builderMode === "edit"
+                      ? "Update event metadata and the participant form. Changes go live immediately."
+                      : "Set up event details, write the welcome message, and build the registration form. Bank ID and Photo Consent are always present."}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flow-step"><div className="flow-icon"><FilePlus className="h-4 w-4" /></div><div><p className="flow-title">Pick the event</p><p className="flow-description">Forms are scoped to one Event Code so they auto-close when the event closes.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><FilePlus className="h-4 w-4" /></div><div><p className="flow-title">Drag-and-drop fields</p><p className="flow-description">Text, dropdown, radio, checkbox, date, file upload. Mark required and one Unique ID field.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><FilePlus className="h-4 w-4" /></div><div><p className="flow-title">Preview + publish</p><p className="flow-description">Generate three shareable URLs: registration, check-in, checkout. Admin never touches code.</p></div></div>
+                <CardContent>
+                  <form className="space-y-6" onSubmit={handleSaveBuilder}>
+
+                    {/* Event metadata */}
+                    <fieldset className="builder-section">
+                      <legend className="builder-section-title">Event details</legend>
+                      <div className="field-grid">
+                        <div className="space-y-2">
+                          <Label htmlFor="b-clientName">Client name *</Label>
+                          <Input id="b-clientName" value={builderForm.clientName} onChange={(e) => updateBuilderField("clientName", e.target.value)} placeholder="Standard Chartered Bank" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="b-title">Event title *</Label>
+                          <Input id="b-title" value={builderForm.title} onChange={(e) => updateBuilderField("title", e.target.value)} placeholder="CSR Activity Chennai - Quiz Calendar Creation" />
+                        </div>
+                      </div>
+                      <div className="field-grid">
+                        <div className="space-y-2">
+                          <Label htmlFor="b-location">Location *</Label>
+                          <Input id="b-location" value={builderForm.location} onChange={(e) => updateBuilderField("location", e.target.value)} placeholder="DLF Downtown" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="b-eventDate">Event date *</Label>
+                          <Input id="b-eventDate" type="date" value={builderForm.eventDate} onChange={(e) => updateBuilderField("eventDate", e.target.value)} />
+                        </div>
+                      </div>
+                      <div className="field-grid">
+                        <div className="space-y-2">
+                          <Label>Duplicate blocking key</Label>
+                          <Select value={builderForm.duplicateField} onValueChange={(v) => updateBuilderField("duplicateField", v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="employeeId">Bank ID / Employee ID</SelectItem>
+                              <SelectItem value="email">Email Address</SelectItem>
+                              <SelectItem value="phone">Mobile Number</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="b-retention">Retention window (days)</Label>
+                          <Input id="b-retention" type="number" min="1" max="365" value={builderForm.retentionDays} onChange={(e) => updateBuilderField("retentionDays", e.target.value)} />
+                        </div>
+                      </div>
+                    </fieldset>
+
+                    {/* Welcome / description */}
+                    <fieldset className="builder-section">
+                      <legend className="builder-section-title">Welcome message</legend>
+                      <p className="builder-section-hint">Shown to participants above the form. Use blank lines to separate paragraphs.</p>
+                      <Textarea
+                        rows={8}
+                        value={builderForm.description}
+                        onChange={(e) => updateBuilderField("description", e.target.value)}
+                        placeholder={"Welcome!\n\nThank you for joining. Please fill out the form to mark your attendance."}
+                      />
+                    </fieldset>
+
+                    {/* Unique ID label */}
+                    <fieldset className="builder-section">
+                      <legend className="builder-section-title">Unique ID field</legend>
+                      <p className="builder-section-hint">Label for the always-on dedupe field. Default "Bank ID". Rename per event if needed (Employee ID, Membership Number, etc).</p>
+                      <div className="space-y-2">
+                        <Label htmlFor="b-uidLabel">Label</Label>
+                        <Input id="b-uidLabel" value={builderForm.uniqueIdLabel} onChange={(e) => updateBuilderField("uniqueIdLabel", e.target.value)} placeholder="Bank ID" />
+                      </div>
+                    </fieldset>
+
+                    {/* Custom fields */}
+                    <fieldset className="builder-section">
+                      <legend className="builder-section-title">Custom fields</legend>
+                      <p className="builder-section-hint">
+                        Full Name, {builderForm.uniqueIdLabel || "Bank ID"}, and Photo Consent are always present. Add anything else you want to capture below.
+                      </p>
+
+                      {builderForm.formFields.length === 0 && (
+                        <div className="builder-empty">No custom fields yet. Add one to capture extra information.</div>
+                      )}
+
+                      <div className="builder-field-list">
+                        {builderForm.formFields.map((field, idx) => (
+                          <div key={field.key + idx} className="builder-field">
+                            <div className="builder-field-head">
+                              <span className="builder-field-num">{idx + 1}.</span>
+                              <Input
+                                value={field.label}
+                                onChange={(e) => updateBuilderCustomField(idx, { label: e.target.value })}
+                                placeholder="Question label (e.g. Department)"
+                                className="builder-field-label-input"
+                              />
+                              <Select value={field.type} onValueChange={(v) => updateBuilderCustomField(idx, { type: v })}>
+                                <SelectTrigger className="builder-field-type-trigger"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {FIELD_TYPES.map((t) => (
+                                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+
+                            {FIELD_TYPES_WITH_OPTIONS.includes(field.type) && (
+                              <div className="space-y-2">
+                                <Label className="builder-field-sub-label">Options (one per line)</Label>
+                                <Textarea
+                                  rows={3}
+                                  value={(field.options || []).join("\n")}
+                                  onChange={(e) => updateBuilderCustomField(idx, {
+                                    options: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
+                                  })}
+                                  placeholder={field.type === "radio" ? "Yes\nNo" : "Option A\nOption B\nOption C"}
+                                />
+                              </div>
+                            )}
+
+                            <div className="builder-field-foot">
+                              <label className="builder-required">
+                                <input type="checkbox" checked={!!field.required} onChange={(e) => updateBuilderCustomField(idx, { required: e.target.checked })} />
+                                <span>Required</span>
+                              </label>
+                              <div className="builder-field-actions">
+                                <Button type="button" variant="outline" size="sm" onClick={() => moveBuilderCustomField(idx, -1)} disabled={idx === 0}>↑</Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => moveBuilderCustomField(idx, 1)} disabled={idx === builderForm.formFields.length - 1}>↓</Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => removeBuilderCustomField(idx)}>
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" /> Remove
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <Button type="button" variant="outline" onClick={addBuilderCustomField}>
+                        <FilePlus className="mr-2 h-4 w-4" /> Add field
+                      </Button>
+                    </fieldset>
+
+                    <div className="builder-actions">
+                      <Button type="button" variant="outline" onClick={() => setActiveTab("events")} disabled={savingBuilder}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" className="cta-button builder-save" disabled={savingBuilder}>
+                        {savingBuilder
+                          ? "Saving..."
+                          : builderMode === "edit"
+                            ? "Save changes"
+                            : "Create event"}
+                      </Button>
+                    </div>
+
+                  </form>
                 </CardContent>
               </Card>
             </div>
@@ -2387,111 +2793,22 @@ function App() {
 
           <TabsContent value="events">
             <div className="page-stack">
-              <Card className="glass-card">
-                <CardHeader>
-                  <CardTitle>Create Event</CardTitle>
-                  <CardDescription>
-                    This is the client-facing setup step: define the event, duplicate rule, retention window, and the demo link.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
+              <div className="events-toolbar">
+                <div className="events-toolbar-left">
+                  <h2 className="events-toolbar-title">All events</h2>
+                  <p className="events-toolbar-sub">Browse existing events. Build new ones in the Form Builder.</p>
+                </div>
+                <div className="events-toolbar-actions">
                   {!events.length && (
-                    <div className="helper-banner">
-                      <p>No event exists yet. Start by creating one or seed the Standard Chartered demo event.</p>
-                      <Button type="button" variant="outline" onClick={handleSeedDemoEvent}>
-                        Load SCB Demo Event
-                      </Button>
-                    </div>
-                  )}
-
-                  <form className="space-y-5" onSubmit={handleCreateEvent}>
-                    <div className="field-grid">
-                      <div className="space-y-2">
-                        <Label htmlFor="clientName">Client Name</Label>
-                        <Input
-                          id="clientName"
-                          value={eventForm.clientName}
-                          onChange={(event) => updateEventField("clientName", event.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="title">Event Title</Label>
-                        <Input
-                          id="title"
-                          value={eventForm.title}
-                          onChange={(event) => updateEventField("title", event.target.value)}
-                          placeholder="Rewards Campaign Registration"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="field-grid">
-                      <div className="space-y-2">
-                        <Label htmlFor="location">Location</Label>
-                        <Input
-                          id="location"
-                          value={eventForm.location}
-                          onChange={(event) => updateEventField("location", event.target.value)}
-                          placeholder="Chennai Regional Hub"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="eventDate">Event Date</Label>
-                        <Input
-                          id="eventDate"
-                          type="date"
-                          value={eventForm.eventDate}
-                          onChange={(event) => updateEventField("eventDate", event.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="field-grid">
-                      <div className="space-y-2">
-                        <Label>Duplicate Blocking Key</Label>
-                        <Select
-                          value={eventForm.duplicateField}
-                          onValueChange={(value) => updateEventField("duplicateField", value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="employeeId">Employee ID</SelectItem>
-                            <SelectItem value="email">Email Address</SelectItem>
-                            <SelectItem value="phone">Mobile Number</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="retentionDays">Retention Window</Label>
-                        <Input
-                          id="retentionDays"
-                          type="number"
-                          min="1"
-                          max="365"
-                          value={eventForm.retentionDays}
-                          onChange={(event) => updateEventField("retentionDays", event.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="notes">Client Notes</Label>
-                      <Textarea
-                        id="notes"
-                        value={eventForm.notes}
-                        onChange={(event) => updateEventField("notes", event.target.value)}
-                        placeholder="Mention approved collection fields, event contacts, or data handling notes."
-                      />
-                    </div>
-
-                    <Button type="submit" className="cta-button" disabled={creatingEvent}>
-                      {creatingEvent ? "Creating event..." : "Create Event and QR Flow"}
+                    <Button type="button" variant="outline" onClick={handleSeedDemoEvent}>
+                      Load SCB Demo Event
                     </Button>
-                  </form>
-                </CardContent>
-              </Card>
+                  )}
+                  <Button type="button" className="cta-button events-toolbar-cta" onClick={startBuilderCreate}>
+                    <FilePlus className="mr-2 h-4 w-4" /> New event
+                  </Button>
+                </div>
+              </div>
 
               <Card className="glass-card">
                 <CardHeader>
@@ -2558,37 +2875,54 @@ function App() {
                                       <LogOut className="mr-1 h-3.5 w-3.5" /> Deactivate
                                     </Button>
                                   )}
+                                  <Button type="button" variant="outline" size="sm" onClick={() => startBuilderEdit(ev)} title="Open this event in Form Builder">
+                                    <FilePlus className="mr-1 h-3.5 w-3.5" /> Edit
+                                  </Button>
                                   <Button type="button" variant="outline" size="sm" onClick={() => handleResetEventData(ev)} title="Wipe this event's registrations + check-ins + check-outs; keep the event">
                                     <RefreshCw className="mr-1 h-3.5 w-3.5" /> Reset Data
                                   </Button>
                                 </div>
-                                <div className="form-toggles">
-                                  <span className="form-toggles-label">Forms:</span>
-                                  <button
-                                    type="button"
-                                    className={`form-pill ${ev.registrationEnabled !== false ? "form-pill-on" : "form-pill-off"}`}
-                                    onClick={() => handleToggleForm(ev, "registration")}
-                                    title="Toggle the Registration form for this event"
-                                  >
-                                    Reg {ev.registrationEnabled !== false ? "ON" : "OFF"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`form-pill ${ev.checkInEnabled !== false ? "form-pill-on" : "form-pill-off"}`}
-                                    onClick={() => handleToggleForm(ev, "checkIn")}
-                                    title="Toggle the Check-In form for this event"
-                                  >
-                                    Check-In {ev.checkInEnabled !== false ? "ON" : "OFF"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`form-pill ${ev.checkOutEnabled !== false ? "form-pill-on" : "form-pill-off"}`}
-                                    onClick={() => handleToggleForm(ev, "checkOut")}
-                                    title="Toggle the Checkout form for this event"
-                                  >
-                                    Checkout {ev.checkOutEnabled !== false ? "ON" : "OFF"}
-                                  </button>
-                                </div>
+                                {(() => {
+                                  const eventActive = (ev.status || "active") === "active";
+                                  const regOn = eventActive && ev.registrationEnabled !== false;
+                                  const ciOn = eventActive && ev.checkInEnabled !== false;
+                                  const coOn = eventActive && ev.checkOutEnabled !== false;
+                                  const inactiveTip = eventActive
+                                    ? null
+                                    : "Event is inactive — all forms are paused. Activate the event to re-enable.";
+                                  return (
+                                    <div className="form-toggles">
+                                      <span className="form-toggles-label">Forms:</span>
+                                      <button
+                                        type="button"
+                                        className={`form-pill ${regOn ? "form-pill-on" : "form-pill-off"}`}
+                                        onClick={() => handleToggleForm(ev, "registration")}
+                                        title={inactiveTip || "Toggle the Registration form for this event"}
+                                        disabled={!eventActive}
+                                      >
+                                        Reg {regOn ? "ON" : "OFF"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`form-pill ${ciOn ? "form-pill-on" : "form-pill-off"}`}
+                                        onClick={() => handleToggleForm(ev, "checkIn")}
+                                        title={inactiveTip || "Toggle the Check-In form for this event"}
+                                        disabled={!eventActive}
+                                      >
+                                        Check-In {ciOn ? "ON" : "OFF"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className={`form-pill ${coOn ? "form-pill-on" : "form-pill-off"}`}
+                                        onClick={() => handleToggleForm(ev, "checkOut")}
+                                        title={inactiveTip || "Toggle the Checkout form for this event"}
+                                        disabled={!eventActive}
+                                      >
+                                        Checkout {coOn ? "ON" : "OFF"}
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
                               </TableCell>
                             </TableRow>
                           );
