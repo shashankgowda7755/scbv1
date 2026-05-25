@@ -618,7 +618,8 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [eventAttendance]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attendanceRows, selectedEventId]);
   const totalRegistrations = registrations.length;
   const shareUrl = selectedEvent ? getEventShareUrl(selectedEvent.id) : "";
 
