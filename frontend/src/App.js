@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Component, useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { AlertTriangle, BarChart3, CalendarPlus, CheckCircle2, ClipboardList, Database, Download, Eye, EyeOff, FilePlus, FileText, KeyRound, Link2, LockKeyhole, LogOut, PlayCircle, QrCode, RefreshCw, ShieldCheck, Trash2, UserPlus, XCircle } from "lucide-react";
 
@@ -2388,4 +2388,55 @@ function App() {
   );
 }
 
-export default App;
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("[SCB ErrorBoundary]", error, info?.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: "2rem", fontFamily: "ui-sans-serif, system-ui", maxWidth: 880, margin: "0 auto" }}>
+          <h1 style={{ color: "#991B1B", fontSize: 22, marginBottom: 12 }}>Something crashed.</h1>
+          <p style={{ color: "#3F3F46", marginBottom: 16 }}>
+            The app caught a runtime error. Click below to wipe local state and reload.
+          </p>
+          <pre style={{ background: "#FEF2F2", color: "#7F1D1D", padding: "0.75rem", borderRadius: 8, fontSize: 12, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
+            {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
+          </pre>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                Object.keys(window.localStorage)
+                  .filter((k) => k.startsWith("scb-") || k === "SCB_FORCE_DEMO" || k === "SCB_DATA_KEY_V1")
+                  .forEach((k) => window.localStorage.removeItem(k));
+              } catch {}
+              window.location.reload();
+            }}
+            style={{ marginTop: 16, padding: "0.6rem 1.2rem", background: "#0A0A0A", color: "#fff", border: 0, borderRadius: 8, cursor: "pointer", fontWeight: 600 }}
+          >
+            Wipe local data and reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function AppWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
+export default AppWithBoundary;
