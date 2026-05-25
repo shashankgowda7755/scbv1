@@ -276,6 +276,33 @@ body {
   margin: 0;
 }
 
+.scb-reset-btn {
+  margin-top: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--gray-500);
+  border: 1px dashed var(--gray-200);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease;
+}
+.scb-reset-btn:hover {
+  border-color: var(--orange);
+  color: var(--orange-deep);
+}
+.scb-build {
+  margin-top: 0.45rem;
+  font-size: 0.65rem;
+  color: var(--gray-500);
+  font-family: ui-monospace, SF Mono, monospace;
+  text-align: center;
+}
+
 .scb-status-pill {
   display: inline-flex;
   align-items: center;
@@ -739,8 +766,17 @@ td {
 /* ---------- Alerts ---------- */
 
 .status-alert {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 30;
   margin-bottom: 1rem;
   border-radius: var(--radius-md);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  animation: scb-alert-pop 220ms ease-out;
+}
+@keyframes scb-alert-pop {
+  from { transform: translateY(-6px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
 }
 
 /* ---------- Helper banner (event seed) ---------- */

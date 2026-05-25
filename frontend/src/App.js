@@ -26,6 +26,8 @@ import {
   STATUS_LABEL,
 } from "@/lib/event-store";
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
+
+const BUILD_STAMP = "v2.1-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -391,7 +393,13 @@ function App() {
   const [checkOuts, setCheckOuts] = useState([]);
   const [attendanceRows, setAttendanceRows] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState("");
-  const [activeTab, setActiveTab] = useState("events");
+  const [activeTab, _setActiveTab] = useState("events");
+  const setActiveTab = (next) => {
+    _setActiveTab(next);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
   const [registrationForm, setRegistrationForm] = useState(registrationDefaults);
   const [eventForm, setEventForm] = useState(eventDefaults);
   const [message, setMessage] = useState({ type: "", text: "" });
@@ -441,6 +449,21 @@ function App() {
     });
     return () => offMode();
   }, []);
+
+  // Auto-dismiss success/error messages after 6s
+  useEffect(() => {
+    if (!message.text) return undefined;
+    const t = window.setTimeout(() => setMessage({ type: "", text: "" }), 6000);
+    return () => window.clearTimeout(t);
+  }, [message.text]);
+
+  function handleHardReset() {
+    if (!window.confirm("Clear all local data and reload? This wipes events/registrations/check-ins held in this browser.")) return;
+    try {
+      Object.keys(window.localStorage).filter((k) => k.startsWith("scb-") || k === "SCB_FORCE_DEMO" || k === "SCB_DATA_KEY_V1").forEach((k) => window.localStorage.removeItem(k));
+    } catch {}
+    window.location.reload();
+  }
 
   useEffect(() => {
     const unsubEvents = subscribeEvents(setEvents);
@@ -1321,6 +1344,10 @@ function App() {
               <Database className="h-3.5 w-3.5" />
               {storeMode === "firebase" ? "Firestore live" : "Demo mode"}
             </Badge>
+            <button type="button" className="scb-reset-btn" onClick={handleHardReset} title="Wipe local data and reload">
+              Reset
+            </button>
+            <div className="scb-build">build {BUILD_STAMP}</div>
           </div>
         </aside>
 
@@ -1341,8 +1368,10 @@ function App() {
             <Alert className="status-alert border-amber-300 bg-amber-50">
               <AlertTriangle className="h-5 w-5 text-amber-600" />
               <AlertDescription className="text-amber-900">
-                Using local store. {fallbackBanner}. Data lives in this browser only. To switch back to Firestore, deploy rules then{" "}
-                <button type="button" className="underline" onClick={reenableFirestoreMode}>reload</button>.
+                Using local store. {fallbackBanner}. Data lives in this browser only.{" "}
+                <button type="button" className="underline" onClick={reenableFirestoreMode}>Retry Firestore</button>
+                {" · "}
+                <button type="button" className="underline" onClick={handleHardReset}>Hard reset</button>
               </AlertDescription>
             </Alert>
           )}
