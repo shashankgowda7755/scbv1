@@ -13,6 +13,7 @@ import {
   createEvent,
   deleteEvent,
   resetEventData,
+  setEventFormEnabled,
   saveRegistration,
   saveCheckIn,
   saveCheckOut,
@@ -29,7 +30,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v3.0-reveal-copy-fix-2026-05-26";
+const BUILD_STAMP = "v3.1-form-gates-2026-05-26";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -999,6 +1000,25 @@ function App() {
     }
   }
 
+  async function handleToggleForm(eventArg, formKey) {
+    const ev = eventArg || selectedEvent;
+    if (!ev) return;
+    const field = formKey === "registration" ? "registrationEnabled"
+      : formKey === "checkIn" ? "checkInEnabled"
+      : formKey === "checkOut" ? "checkOutEnabled" : null;
+    if (!field) return;
+    const currentlyEnabled = ev[field] !== false;
+    try {
+      await setEventFormEnabled(ev.id, formKey, !currentlyEnabled);
+      setMessage({
+        type: "success",
+        text: `${formKey === "registration" ? "Registration" : formKey === "checkIn" ? "Check-In" : "Checkout"} form ${currentlyEnabled ? "disabled" : "enabled"} for "${ev.title}".`,
+      });
+    } catch (error) {
+      setMessage({ type: "error", text: `Toggle failed: ${error?.message || error}` });
+    }
+  }
+
   async function handleResetEventData(eventOrId) {
     const ev = typeof eventOrId === "string"
       ? events.find((e) => e.id === eventOrId)
@@ -1302,6 +1322,45 @@ function App() {
           text: "Unable to seed the demo event right now.",
         });
       });
+  }
+
+  const participantBlock = (() => {
+    if (!participantMode) return null;
+    // Loading: events not arrived yet, wait until subscribeEvents fires.
+    if (!events.length || !selectedEvent) return null;
+    if ((selectedEvent.status || "active") === "closed") {
+      return { title: "This event is inactive", body: "The organiser has paused this event. The form will return once it is reactivated." };
+    }
+    if (participantMode === "register" && selectedEvent.registrationEnabled === false) {
+      return { title: "Registration is closed", body: "Registration for this event has been turned off by the organiser." };
+    }
+    if (participantMode === "checkin" && selectedEvent.checkInEnabled === false) {
+      return { title: "Check-In is closed", body: "Check-In for this event has been turned off by the organiser." };
+    }
+    if (participantMode === "checkout" && selectedEvent.checkOutEnabled === false) {
+      return { title: "Checkout is closed", body: "Checkout for this event has been turned off by the organiser." };
+    }
+    return null;
+  })();
+
+  if (participantBlock) {
+    return (
+      <div className="gform-page">
+        <main className="gform-shell">
+          <div className="gform-header">
+            <h1>{participantBlock.title}</h1>
+            <p className="gform-lead">{participantBlock.body}</p>
+            {selectedEvent && (
+              <p className="gform-meta">
+                <strong>Event:</strong> {selectedEvent.title}<br />
+                <strong>Date:</strong> {formatDate(selectedEvent.eventDate)}<br />
+                <strong>Location:</strong> {selectedEvent.location}
+              </p>
+            )}
+          </div>
+        </main>
+      </div>
+    );
   }
 
   if (participantMode === "checkin") {
@@ -2502,6 +2561,33 @@ function App() {
                                   <Button type="button" variant="outline" size="sm" onClick={() => handleResetEventData(ev)} title="Wipe this event's registrations + check-ins + check-outs; keep the event">
                                     <RefreshCw className="mr-1 h-3.5 w-3.5" /> Reset Data
                                   </Button>
+                                </div>
+                                <div className="form-toggles">
+                                  <span className="form-toggles-label">Forms:</span>
+                                  <button
+                                    type="button"
+                                    className={`form-pill ${ev.registrationEnabled !== false ? "form-pill-on" : "form-pill-off"}`}
+                                    onClick={() => handleToggleForm(ev, "registration")}
+                                    title="Toggle the Registration form for this event"
+                                  >
+                                    Reg {ev.registrationEnabled !== false ? "ON" : "OFF"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`form-pill ${ev.checkInEnabled !== false ? "form-pill-on" : "form-pill-off"}`}
+                                    onClick={() => handleToggleForm(ev, "checkIn")}
+                                    title="Toggle the Check-In form for this event"
+                                  >
+                                    Check-In {ev.checkInEnabled !== false ? "ON" : "OFF"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`form-pill ${ev.checkOutEnabled !== false ? "form-pill-on" : "form-pill-off"}`}
+                                    onClick={() => handleToggleForm(ev, "checkOut")}
+                                    title="Toggle the Checkout form for this event"
+                                  >
+                                    Checkout {ev.checkOutEnabled !== false ? "ON" : "OFF"}
+                                  </button>
                                 </div>
                               </TableCell>
                             </TableRow>

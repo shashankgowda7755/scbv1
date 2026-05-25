@@ -1,9 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no">
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#0f766e" />
+        <meta name="google" content="notranslate" />
         <meta name="description" content="Firebase-backed event registration and dashboard demo for Standard Chartered workflows." />
         <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com; img-src 'self' data:;" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -23,9 +24,37 @@
         Learn how to configure a non-root public URL by running `npm run build`.
         -->
         <title>SCB Event Registration Demo</title>
-        <script>window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);</script>
+        <script>
+        // Existing DataCloneError swallow.
+        window.addEventListener("error",function(e){if(e.error instanceof DOMException&&e.error.name==="DataCloneError"&&e.message&&e.message.includes("PerformanceServerTiming")){e.stopImmediatePropagation();e.preventDefault()}},true);
+        // React reconciliation guard against browser extensions (Google Translate,
+        // Grammarly, autofill helpers) that mutate the DOM and leave React unable
+        // to find children. We wrap the two native methods React calls during
+        // reconciliation so a NotFoundError no longer takes down the whole tree.
+        (function(){
+          try {
+            var origInsertBefore = Node.prototype.insertBefore;
+            Node.prototype.insertBefore = function(newNode, refNode){
+              try { return origInsertBefore.call(this, newNode, refNode); }
+              catch(err){
+                if (err && err.name === "NotFoundError") { return origInsertBefore.call(this, newNode, null); }
+                throw err;
+              }
+            };
+            var origRemoveChild = Node.prototype.removeChild;
+            Node.prototype.removeChild = function(child){
+              try { return origRemoveChild.call(this, child); }
+              catch(err){
+                if (err && err.name === "NotFoundError" && child && child.parentNode) { return child.parentNode.removeChild(child); }
+                if (err && err.name === "NotFoundError") { return child; }
+                throw err;
+              }
+            };
+          } catch(e) { /* ignore — best-effort patch */ }
+        })();
+        </script>
     </head>
-    <body>
+    <body class="notranslate">
         <noscript>You need to enable JavaScript to run this app.</noscript>
         <div id="root"></div>
         <!--

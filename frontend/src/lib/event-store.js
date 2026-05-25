@@ -128,6 +128,12 @@ function buildEventRecord(input) {
     retentionDays,
     notes: normalizeString(input.notes),
     status: "active",
+    // Per-form gates. Default true so existing flows keep working. Toggling one
+    // off shuts that specific participant URL (?mode=register / checkin /
+    // checkout) for this event only, without deactivating the entire event.
+    registrationEnabled: input.registrationEnabled !== false,
+    checkInEnabled: input.checkInEnabled !== false,
+    checkOutEnabled: input.checkOutEnabled !== false,
     createdAt,
     expiresAt: buildExpiresAt(input.eventDate, retentionDays),
   };
@@ -546,6 +552,26 @@ export async function deleteEvent(eventId) {
 // Wipe all child data for an event but keep the event doc itself.
 // Used for "Reset Event Data" — re-run a dry-run or recovered event without
 // destroying the event configuration (title, date, location, duplicate rule).
+// Per-event form toggle: enable / disable an individual form for one event.
+// formKey: "registration" | "checkIn" | "checkOut"
+export async function setEventFormEnabled(eventId, formKey, enabled) {
+  const fieldMap = {
+    registration: "registrationEnabled",
+    checkIn: "checkInEnabled",
+    checkOut: "checkOutEnabled",
+  };
+  const field = fieldMap[formKey];
+  if (!field) throw new Error(`Unknown form key: ${formKey}`);
+  if (getFirebaseMode() === "firebase") {
+    await updateDoc(doc(firestoreDb, "events", eventId), { [field]: !!enabled });
+    return;
+  }
+  const store = loadDemoStore();
+  store.events = store.events.map((ev) => ev.id === eventId ? { ...ev, [field]: !!enabled } : ev);
+  saveDemoStore(store);
+  notifyDemoListeners();
+}
+
 export async function resetEventData(eventId) {
   if (getFirebaseMode() === "firebase") {
     for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
