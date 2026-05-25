@@ -28,7 +28,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.4-no-demo-2026-05-25";
+const BUILD_STAMP = "v2.5-event-scope-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -628,6 +628,14 @@ function App() {
   const walkInCount = eventAttendance.filter((a) => a.walkInFlag).length;
   const completeCount = eventAttendance.filter((a) => a.statusCode === "COMPLETE").length;
   const noShowCount = eventAttendance.filter((a) => a.statusCode === "NO_SHOW").length;
+  // "Did not" counters answer the operator's audit questions directly.
+  const didNotCheckInCount = eventAttendance.filter((a) => a.registrationTime && !a.checkInTime).length;
+  const didNotCheckOutCount = eventAttendance.filter((a) => a.checkInTime && !a.checkOutTime).length;
+  const didNotRegisterCount = walkInCount; // walked in without registering
+  const statusCounts = Object.keys(STATUS_LABEL).reduce((acc, code) => {
+    acc[code] = eventAttendance.filter((a) => a.statusCode === code).length;
+    return acc;
+  }, {});
   const completionRate = eventRegistrations.length
     ? Math.round((completeCount / eventRegistrations.length) * 100)
     : 0;
@@ -1365,14 +1373,31 @@ function App() {
         {duplicateState.open && (
           <div className="modal-overlay" role="dialog" aria-modal="true">
             <div className="modal-card">
-              <h2 className="text-2xl font-semibold text-slate-950">You are already registered</h2>
+              <h2 className="text-2xl font-semibold text-slate-950">You already registered for this event</h2>
               <p className="text-sm leading-6 text-slate-600">
-                We already have a record for this {duplicateState.event ? duplicateFieldLabels[duplicateState.event.duplicateField] : "field"}.
-                Submit again to update it, or close to keep the existing entry.
+                We have an earlier submission tied to your {duplicateState.event ? duplicateFieldLabels[duplicateState.event.duplicateField] : "ID"}.
               </p>
+              {(() => {
+                const prior = duplicateState.existingRecord || {};
+                const pending = duplicateState.pendingRegistration || {};
+                const priorPart = prior.participation || "Yes";
+                const pendingPart = pending.participation || "Yes";
+                const changed = priorPart !== pendingPart;
+                return (
+                  <div className="duplicate-diff">
+                    <div className="duplicate-diff-row">
+                      <span>Previously on {formatDateTime(prior.updatedAt || prior.createdAt)} you said attending: <strong>{priorPart}</strong>.</span>
+                    </div>
+                    <div className="duplicate-diff-row">
+                      <span>Now you are saying attending: <strong>{pendingPart}</strong>.</span>
+                      {changed && <span className="duplicate-diff-flag">CHANGED</span>}
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="modal-actions">
                 <Button type="button" variant="outline" onClick={() => setDuplicateState({ open: false, event: null, existingRecord: null, pendingRegistration: null })}>
-                  Keep Existing
+                  Keep Previous Entry
                 </Button>
                 <Button type="button" onClick={confirmDuplicateReplace}>Update My Entry</Button>
               </div>
@@ -1495,10 +1520,31 @@ function App() {
               <div className="scb-crumb">SCB Event Platform / {activeLabel}</div>
               <h1>{activeLabel}</h1>
             </div>
-            <div className="scb-stats">
-              <div className="scb-stat"><span>Events</span><strong>{events.length}</strong></div>
-              <div className="scb-stat"><span>Registrations</span><strong>{totalRegistrations}</strong></div>
-              <div className="scb-stat"><span>This Event</span><strong>{selectedEvent ? eventRegistrations.length : 0}</strong></div>
+            <div className="scb-topbar-right">
+              <div className="scb-event-picker">
+                <Label className="scb-event-picker-label">Event</Label>
+                <Select
+                  value={selectedEventId || ""}
+                  onValueChange={(v) => setSelectedEventId(v)}
+                  disabled={!events.length}
+                >
+                  <SelectTrigger className="scb-event-trigger">
+                    <SelectValue placeholder={events.length ? "Pick event" : "Create one first"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {events.map((ev) => (
+                      <SelectItem key={ev.id} value={ev.id}>
+                        {ev.title}{ev.status === "closed" ? " (closed)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="scb-stats">
+                <div className="scb-stat"><span>Registered</span><strong>{selectedEvent ? eventRegistrations.length : 0}</strong></div>
+                <div className="scb-stat"><span>Checked-In</span><strong>{selectedEvent ? eventCheckIns.length : 0}</strong></div>
+                <div className="scb-stat"><span>Checked-Out</span><strong>{selectedEvent ? eventCheckOuts.length : 0}</strong></div>
+              </div>
             </div>
           </header>
 
@@ -1532,7 +1578,40 @@ function App() {
             <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
-                  <CardTitle>Capture Registration</CardTitle>
+                  <CardTitle>Share Registration Link</CardTitle>
+                  <CardDescription>
+                    Send this link to the SCB team. They fill the form themselves — you don't capture data by hand.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {selectedEvent ? (
+                    <>
+                      <div className="link-row">
+                        <div className="link-box">{shareUrl}</div>
+                        <Button type="button" variant="outline" onClick={handleCopyShareLink}>
+                          <Link2 className="mr-2 h-4 w-4" /> Copy Link
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => window.open(shareUrl, "_blank", "noopener,noreferrer")}>
+                          Open
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => setActiveTab("qrshare")}>
+                          <QrCode className="mr-2 h-4 w-4" /> Show QR
+                        </Button>
+                      </div>
+                      {copyMessage && <p className="helper-copy">{copyMessage}</p>}
+                      <p className="helper-copy">
+                        Event: <strong>{selectedEvent.title}</strong> · {formatDate(selectedEvent.eventDate)} · {selectedEvent.location}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="empty-state">Pick an event from the topbar to get its share link.</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Manual Capture (Backup)</CardTitle>
                   <CardDescription>
                     Employees land on this form from the QR code or a private link. Duplicate prevention is event-specific.
                   </CardDescription>
@@ -1674,9 +1753,43 @@ function App() {
             <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
+                  <CardTitle>All Events — Quick Switch</CardTitle>
+                  <CardDescription>
+                    Click any event to load its QR + share link below.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {events.length ? (
+                    <div className="event-grid">
+                      {events.map((ev) => (
+                        <button
+                          key={ev.id}
+                          type="button"
+                          className={`event-tile ${ev.id === selectedEventId ? "event-tile-active" : ""}`}
+                          onClick={() => setSelectedEventId(ev.id)}
+                        >
+                          <div className="event-tile-title">{ev.title}</div>
+                          <div className="event-tile-meta">
+                            <span>{formatDate(ev.eventDate)}</span>
+                            <span>{ev.location}</span>
+                          </div>
+                          <div className="event-tile-status">
+                            {(ev.status || "active").toUpperCase()}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">No events. Create one in the Events tab.</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card">
+                <CardHeader>
                   <CardTitle>Event QR and Private Link</CardTitle>
                   <CardDescription>
-                    Generate one QR per event so the client can distribute the registration page internally.
+                    QR encodes the registration URL. Share the link directly via email/Slack, or print the QR for venue signage.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -1688,14 +1801,23 @@ function App() {
                         ) : (
                           <div className="qr-placeholder">QR preview unavailable</div>
                         )}
+                        {qrCodeUrl && (
+                          <a className="qr-download" href={qrCodeUrl} download={`${selectedEvent.id}-qr.png`}>
+                            <Download className="h-3.5 w-3.5" /> Download PNG
+                          </a>
+                        )}
                       </div>
                       <div className="qr-meta">
                         <div className="summary-item">
                           <span>Event</span>
                           <strong>{selectedEvent.title}</strong>
                         </div>
+                        <div className="summary-item">
+                          <span>Date</span>
+                          <strong>{formatDate(selectedEvent.eventDate)}</strong>
+                        </div>
                         <div className="space-y-2">
-                          <Label>Share Link</Label>
+                          <Label>Registration Share Link</Label>
                           <div className="link-row">
                             <div className="link-box">{shareUrl}</div>
                             <Button type="button" variant="outline" onClick={handleCopyShareLink}>
@@ -1708,11 +1830,29 @@ function App() {
                             Open participant view in a new tab →
                           </a>
                         </div>
+                        <div className="space-y-2">
+                          <Label>Check-In Desk URL</Label>
+                          <div className="link-row">
+                            <div className="link-box">{getCheckInUrl(selectedEvent.id)}</div>
+                            <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckInUrl(selectedEvent.id))}>
+                              <Link2 className="mr-2 h-4 w-4" /> Copy
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Checkout Desk URL</Label>
+                          <div className="link-row">
+                            <div className="link-box">{getCheckOutUrl(selectedEvent.id)}</div>
+                            <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckOutUrl(selectedEvent.id))}>
+                              <Link2 className="mr-2 h-4 w-4" /> Copy
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ) : (
                     <div className="empty-state">
-                      Create an event from the Events page to generate the QR link.
+                      Pick an event above to generate its QR + share links.
                     </div>
                   )}
                 </CardContent>
@@ -1990,6 +2130,37 @@ function App() {
                         <div className="summary-item"><span>Complete</span><strong>{completeCount}</strong></div>
                       </div>
 
+                      <div>
+                        <Label className="block mb-2">Operational gaps</Label>
+                        <div className="summary-grid">
+                          <div className="summary-item summary-item-warn">
+                            <span>Did Not Check In</span>
+                            <strong>{didNotCheckInCount}</strong>
+                          </div>
+                          <div className="summary-item summary-item-warn">
+                            <span>Did Not Check Out</span>
+                            <strong>{didNotCheckOutCount}</strong>
+                          </div>
+                          <div className="summary-item summary-item-warn">
+                            <span>Did Not Register (Walk-In)</span>
+                            <strong>{didNotRegisterCount}</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label className="block mb-2">Status breakdown</Label>
+                        <div className="status-breakdown">
+                          {Object.entries(STATUS_LABEL).map(([code, label]) => (
+                            <div key={code} className="status-chip">
+                              <span className={`status-dot ${statusPillClass(code)}`}></span>
+                              <span className="status-chip-label">{label}</span>
+                              <strong>{statusCounts[code] || 0}</strong>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
                       <div className="action-row">
                         <Button type="button" onClick={handleGenerateReport} disabled={reportBusy}>
                           <RefreshCw className="mr-2 h-4 w-4" />
@@ -2197,6 +2368,69 @@ function App() {
                       {creatingEvent ? "Creating event..." : "Create Event and QR Flow"}
                     </Button>
                   </form>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>All Events</CardTitle>
+                  <CardDescription>
+                    Click an event to make it active across the platform. Active event drives every tab + the topbar stats.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {events.length ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Title</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Location</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Registrations</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {events.map((ev) => {
+                          const regCount = registrations.filter((r) => r.eventId === ev.id).length;
+                          const isActive = ev.id === selectedEventId;
+                          return (
+                            <TableRow key={ev.id} className={isActive ? "row-active" : ""}>
+                              <TableCell>
+                                <strong>{ev.title}</strong>
+                                {isActive && <span className="row-active-pill">ACTIVE</span>}
+                              </TableCell>
+                              <TableCell>{formatDate(ev.eventDate)}</TableCell>
+                              <TableCell>{ev.location}</TableCell>
+                              <TableCell>
+                                <Badge variant="outline">{(ev.status || "active").toUpperCase()}</Badge>
+                              </TableCell>
+                              <TableCell>{regCount}</TableCell>
+                              <TableCell>
+                                <div className="action-row">
+                                  <Button type="button" variant="outline" size="sm" onClick={() => setSelectedEventId(ev.id)}>
+                                    Activate
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedEventId(ev.id); setActiveTab("qrshare"); }}>
+                                    <QrCode className="mr-1 h-3.5 w-3.5" /> QR
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedEventId(ev.id); setActiveTab("dashboard"); }}>
+                                    <BarChart3 className="mr-1 h-3.5 w-3.5" /> Dashboard
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedEventId(ev.id); setActiveTab("reports"); }}>
+                                    <FileText className="mr-1 h-3.5 w-3.5" /> Report
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="empty-state">No events yet. Create one above.</div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -2552,32 +2786,63 @@ function App() {
                   This event already has a registration for the selected {duplicateState.event ? duplicateFieldLabels[duplicateState.event.duplicateField] : "field"}.
                 </p>
                 {duplicateState.existingRecord && (
-                  <div className="duplicate-panel">
-                    <div className="summary-item">
-                      <span>Name</span>
-                      <strong>{duplicateDecrypted ? duplicateDecrypted.fullName : duplicateState.existingRecord.maskedFullName || "Decrypting..."}</strong>
+                  <>
+                    {(() => {
+                      const prior = duplicateState.existingRecord;
+                      const pending = duplicateState.pendingRegistration || {};
+                      const priorPart = prior.participation || "Yes";
+                      const pendingPart = pending.participation || "Yes";
+                      const participationChanged = priorPart !== pendingPart;
+                      const priorConsent = prior.photoConsent;
+                      const pendingConsent = pending.photoConsent;
+                      const consentChanged = priorConsent !== pendingConsent;
+                      return (
+                        <div className="duplicate-diff">
+                          <div className="duplicate-diff-row">
+                            <span>Previously on {formatDateTime(prior.updatedAt || prior.createdAt)} this person said attending: <strong>{priorPart}</strong>.</span>
+                          </div>
+                          <div className="duplicate-diff-row">
+                            <span>Now submitting attending: <strong>{pendingPart}</strong>.</span>
+                            {participationChanged && (
+                              <span className="duplicate-diff-flag">CHANGED</span>
+                            )}
+                          </div>
+                          {consentChanged && (
+                            <div className="duplicate-diff-row">
+                              <span>Photo consent: was <strong>{priorConsent ? "Yes" : "No"}</strong>, now <strong>{pendingConsent ? "Yes" : "No"}</strong>.</span>
+                              <span className="duplicate-diff-flag">CHANGED</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    <div className="duplicate-panel">
+                      <div className="summary-item">
+                        <span>Name</span>
+                        <strong>{duplicateDecrypted ? duplicateDecrypted.fullName : duplicateState.existingRecord.maskedFullName || "Decrypting..."}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span>Employee ID</span>
+                        <strong>{duplicateState.existingRecord.maskedEmployeeId}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span>Email</span>
+                        <strong>{duplicateState.existingRecord.maskedEmail}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span>Phone</span>
+                        <strong>{duplicateState.existingRecord.maskedPhone}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span>Last Updated</span>
+                        <strong>{formatDateTime(duplicateState.existingRecord.updatedAt)}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span>Revision</span>
+                        <strong>{duplicateState.existingRecord.revision}</strong>
+                      </div>
                     </div>
-                    <div className="summary-item">
-                      <span>Employee ID</span>
-                      <strong>{duplicateState.existingRecord.maskedEmployeeId}</strong>
-                    </div>
-                    <div className="summary-item">
-                      <span>Email</span>
-                      <strong>{duplicateState.existingRecord.maskedEmail}</strong>
-                    </div>
-                    <div className="summary-item">
-                      <span>Phone</span>
-                      <strong>{duplicateState.existingRecord.maskedPhone}</strong>
-                    </div>
-                    <div className="summary-item">
-                      <span>Last Updated</span>
-                      <strong>{formatDateTime(duplicateState.existingRecord.updatedAt)}</strong>
-                    </div>
-                    <div className="summary-item">
-                      <span>Revision</span>
-                      <strong>{duplicateState.existingRecord.revision}</strong>
-                    </div>
-                  </div>
+                  </>
                 )}
               </div>
 
