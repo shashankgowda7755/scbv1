@@ -1,9 +1,29 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { AlertTriangle, BarChart3, CalendarPlus, ClipboardList, Database, Download, Eye, EyeOff, FilePlus, FileText, KeyRound, Link2, LockKeyhole, LogOut, QrCode, RefreshCw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
+import { AlertTriangle, BarChart3, CalendarPlus, CheckCircle2, ClipboardList, Database, Download, Eye, EyeOff, FilePlus, FileText, KeyRound, Link2, LockKeyhole, LogOut, PlayCircle, QrCode, RefreshCw, ShieldCheck, Trash2, UserPlus, XCircle } from "lucide-react";
 
 import "@/App.css";
-import { getStoreMode, subscribeEvents, subscribeRegistrations, createEvent, deleteEvent, saveRegistration, seedScbDemoEvent, decryptRegistrations, decryptRegistration } from "@/lib/event-store";
+import {
+  getStoreMode,
+  subscribeEvents,
+  subscribeRegistrations,
+  subscribeCheckIns,
+  subscribeCheckOuts,
+  subscribeAttendance,
+  createEvent,
+  deleteEvent,
+  saveRegistration,
+  saveCheckIn,
+  saveCheckOut,
+  computeAttendance,
+  closeEvent,
+  reopenEvent,
+  seedScbDemoEvent,
+  decryptRegistrations,
+  decryptRegistration,
+  decryptAttendanceRow,
+  STATUS_LABEL,
+} from "@/lib/event-store";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +67,34 @@ const eventDefaults = {
     "Volunteers design Quiz Calendars for students. Bank ID = duplicate key. Photo consent captured per participant.",
 };
 
+function statusPillClass(code) {
+  switch (code) {
+    case "COMPLETE":
+    case "WALKIN_COMPLETE":
+      return "status-pill-good";
+    case "NO_SHOW":
+      return "status-pill-bad";
+    case "REG_ONLY":
+    case "REG_CHECKIN":
+    case "REG_CHECKOUT":
+    case "WALKIN_CHECKIN":
+    case "WALKIN_CHECKOUT":
+      return "status-pill-warn";
+    default:
+      return "";
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[c]);
+}
+
 function formatDateTime(value) {
   if (!value) {
     return "-";
@@ -63,19 +111,32 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString();
 }
 
-function getEventShareUrl(eventId) {
+function buildModeUrl(eventId, mode) {
   const url = new URL(window.location.href);
   url.searchParams.set("event", eventId);
-  url.searchParams.set("mode", "register");
-  url.hash = "register";
+  url.searchParams.set("mode", mode);
+  url.hash = mode;
   return url.toString();
 }
 
-function isParticipantMode() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return new URLSearchParams(window.location.search).get("mode") === "register";
+function getEventShareUrl(eventId) {
+  return buildModeUrl(eventId, "register");
+}
+
+function getCheckInUrl(eventId) {
+  return buildModeUrl(eventId, "checkin");
+}
+
+function getCheckOutUrl(eventId) {
+  return buildModeUrl(eventId, "checkout");
+}
+
+const PARTICIPANT_MODES = new Set(["register", "checkin", "checkout"]);
+
+function getParticipantMode() {
+  if (typeof window === "undefined") return null;
+  const mode = new URLSearchParams(window.location.search).get("mode");
+  return PARTICIPANT_MODES.has(mode) ? mode : null;
 }
 
 function validateEventForm(formData) {
@@ -189,11 +250,143 @@ async function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
+function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walkInOpen, setWalkInOpen, onWalkInConfirm }) {
+  const [walkInName, setWalkInName] = useState("");
+  return (
+    <div className="gform-page">
+      <main className="gform-shell">
+        <div className="gform-header">
+          <h1>{event ? `${event.title} — Check-In` : "Event Check-In"}</h1>
+          <p className="gform-lead"><strong>Welcome.</strong> Enter your Unique ID to mark your attendance.</p>
+          {event && (
+            <p className="gform-meta">
+              <strong>Date:</strong> {formatDate(event.eventDate)}<br />
+              <strong>Location:</strong> {event.location}
+            </p>
+          )}
+        </div>
+
+        {result && result.kind !== "duplicate" && (
+          <div className="gform-alert gform-alert-success">
+            <CheckCircle2 className="inline h-4 w-4 mr-2" />
+            {result.displayName ? `Welcome, ${result.displayName}.` : "Walk-in check-in recorded."} Time: {formatDateTime(result.time)}.
+          </div>
+        )}
+        {result && result.kind === "duplicate" && (
+          <div className="gform-alert gform-alert-error">
+            <XCircle className="inline h-4 w-4 mr-2" />
+            Already checked in at {formatDateTime(result.time)}.
+          </div>
+        )}
+
+        <form className="gform-form" onSubmit={onSubmit}>
+          <div className="gform-q">
+            <label htmlFor="ci-id">Unique ID <span className="gform-star">*</span></label>
+            <input
+              id="ci-id"
+              className="gform-input"
+              autoFocus
+              autoComplete="off"
+              placeholder="SCB-EMP-1042"
+              value={form.uniqueId}
+              onChange={(e) => setForm((f) => ({ ...f, uniqueId: e.target.value }))}
+            />
+          </div>
+          <button type="submit" className="gform-submit" disabled={busy || !event}>
+            {busy ? "Checking in..." : "Check In"}
+          </button>
+        </form>
+
+        {walkInOpen && (
+          <div className="modal-overlay" role="dialog" aria-modal="true">
+            <div className="modal-card">
+              <h2 className="text-xl font-semibold">No registration found</h2>
+              <p className="text-sm text-slate-600">
+                Capture as walk-in. Add the attendee's name for the report.
+              </p>
+              <div className="gform-q">
+                <label htmlFor="walkin-name">Full Name</label>
+                <input
+                  id="walkin-name"
+                  className="gform-input"
+                  value={walkInName}
+                  onChange={(e) => setWalkInName(e.target.value)}
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="gform-submit" style={{ background: "#71717A" }} onClick={() => setWalkInOpen(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="gform-submit" onClick={() => onWalkInConfirm(walkInName.trim() || "Walk-in")}>
+                  Record Walk-In
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function ParticipantCheckOut({ event, form, setForm, result, busy, onSubmit }) {
+  return (
+    <div className="gform-page">
+      <main className="gform-shell">
+        <div className="gform-header">
+          <h1>{event ? `${event.title} — Checkout` : "Event Checkout"}</h1>
+          <p className="gform-lead"><strong>Thank you for attending.</strong> Enter your Unique ID to check out.</p>
+          {event && (
+            <p className="gform-meta">
+              <strong>Date:</strong> {formatDate(event.eventDate)}<br />
+              <strong>Location:</strong> {event.location}
+            </p>
+          )}
+        </div>
+
+        {result && result.kind !== "duplicate" && (
+          <div className="gform-alert gform-alert-success">
+            <CheckCircle2 className="inline h-4 w-4 mr-2" />
+            Checkout recorded at {formatDateTime(result.time)}.
+          </div>
+        )}
+        {result && result.kind === "duplicate" && (
+          <div className="gform-alert gform-alert-error">
+            <XCircle className="inline h-4 w-4 mr-2" />
+            Already checked out at {formatDateTime(result.time)}.
+          </div>
+        )}
+
+        <form className="gform-form" onSubmit={onSubmit}>
+          <div className="gform-q">
+            <label htmlFor="co-id">Unique ID <span className="gform-star">*</span></label>
+            <input
+              id="co-id"
+              className="gform-input"
+              autoFocus
+              autoComplete="off"
+              placeholder="SCB-EMP-1042"
+              value={form.uniqueId}
+              onChange={(e) => setForm((f) => ({ ...f, uniqueId: e.target.value }))}
+            />
+          </div>
+          <button type="submit" className="gform-submit" disabled={busy || !event}>
+            {busy ? "Checking out..." : "Check Out"}
+          </button>
+        </form>
+      </main>
+    </div>
+  );
+}
+
 function App() {
   const storeMode = getStoreMode();
-  const participantMode = isParticipantMode();
+  const participantMode = getParticipantMode();
   const [events, setEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
+  const [checkIns, setCheckIns] = useState([]);
+  const [checkOuts, setCheckOuts] = useState([]);
+  const [attendanceRows, setAttendanceRows] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState("");
   const [activeTab, setActiveTab] = useState("events");
   const [registrationForm, setRegistrationForm] = useState(registrationDefaults);
@@ -215,6 +408,20 @@ function App() {
   const [keyFingerprint, setKeyFingerprint] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
 
+  // Check-In / Checkout local state
+  const [checkInForm, setCheckInForm] = useState({ uniqueId: "", fullName: "" });
+  const [checkOutForm, setCheckOutForm] = useState({ uniqueId: "", fullName: "" });
+  const [checkInResult, setCheckInResult] = useState(null);
+  const [checkOutResult, setCheckOutResult] = useState(null);
+  const [checkInBusy, setCheckInBusy] = useState(false);
+  const [checkOutBusy, setCheckOutBusy] = useState(false);
+  const [walkInOpen, setWalkInOpen] = useState(false);
+
+  // Reports
+  const [reportFilter, setReportFilter] = useState("ALL");
+  const [reportBusy, setReportBusy] = useState(false);
+  const [decryptedAttendance, setDecryptedAttendance] = useState([]);
+
   useEffect(() => {
     getKeyFingerprint()
       .then(setKeyFingerprint)
@@ -222,16 +429,17 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribeEvents = subscribeEvents((nextEvents) => {
-      setEvents(nextEvents);
-    });
-    const unsubscribeRegistrations = subscribeRegistrations((nextRegistrations) => {
-      setRegistrations(nextRegistrations);
-    });
-
+    const unsubEvents = subscribeEvents(setEvents);
+    const unsubRegs = subscribeRegistrations(setRegistrations);
+    const unsubIns = subscribeCheckIns(setCheckIns);
+    const unsubOuts = subscribeCheckOuts(setCheckOuts);
+    const unsubAtt = subscribeAttendance(setAttendanceRows);
     return () => {
-      unsubscribeEvents();
-      unsubscribeRegistrations();
+      unsubEvents();
+      unsubRegs();
+      unsubIns();
+      unsubOuts();
+      unsubAtt();
     };
   }, []);
 
@@ -249,13 +457,24 @@ function App() {
 
     setSelectedEventId(nextSelected);
 
-    if (window.location.hash.replace("#", "") === "register") {
-      setActiveTab("registrations");
-    }
+    const hash = window.location.hash.replace("#", "");
+    if (hash === "register") setActiveTab("registrations");
+    else if (hash === "checkin") setActiveTab("checkin");
+    else if (hash === "checkout") setActiveTab("checkout");
   }, [events, selectedEventId]);
 
   const selectedEvent = events.find((event) => event.id === selectedEventId) || null;
-  const eventRegistrations = registrations.filter((registration) => registration.eventId === selectedEventId);
+  const eventRegistrations = registrations.filter((r) => r.eventId === selectedEventId);
+  const eventCheckIns = checkIns.filter((c) => c.eventId === selectedEventId);
+  const eventCheckOuts = checkOuts.filter((c) => c.eventId === selectedEventId);
+  const eventAttendance = attendanceRows.filter((a) => a.eventId === selectedEventId);
+
+  const walkInCount = eventAttendance.filter((a) => a.walkInFlag).length;
+  const completeCount = eventAttendance.filter((a) => a.statusCode === "COMPLETE").length;
+  const noShowCount = eventAttendance.filter((a) => a.statusCode === "NO_SHOW").length;
+  const completionRate = eventRegistrations.length
+    ? Math.round((completeCount / eventRegistrations.length) * 100)
+    : 0;
 
   // Decrypt visible rows whenever privacy mode is off or new rows arrive.
   useEffect(() => {
@@ -321,6 +540,48 @@ function App() {
     () => eventRegistrations.map((record) => decryptedById[record.id] || null),
     [eventRegistrations, decryptedById],
   );
+
+  const globalStats = useMemo(() => {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const eventsThisMonth = events.filter((e) => new Date(e.eventDate) >= monthStart).length;
+    const regsThisMonth = registrations.filter((r) => new Date(r.createdAt) >= monthStart).length;
+    const sortedEvents = [...events].sort((a, b) => new Date(b.eventDate) - new Date(a.eventDate)).slice(0, 6);
+    const trend = sortedEvents.map((e) => {
+      const evRegs = registrations.filter((r) => r.eventId === e.id).length;
+      const evAttendance = attendanceRows.filter((a) => a.eventId === e.id);
+      const completed = evAttendance.filter((a) => a.statusCode === "COMPLETE").length;
+      const rate = evRegs ? Math.round((completed / evRegs) * 100) : 0;
+      return { id: e.id, title: e.title, date: e.eventDate, rate };
+    });
+    return { eventsThisMonth, regsThisMonth, trend };
+  }, [events, registrations, attendanceRows]);
+
+  // Recompute attendance whenever check-in/checkout state changes for the selected event.
+  // Lightweight: writes one doc per unique attendee, idempotent.
+  useEffect(() => {
+    if (!selectedEventId) return;
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      if (cancelled) return;
+      computeAttendance(selectedEventId).catch(() => {});
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [selectedEventId, eventCheckIns.length, eventCheckOuts.length, eventRegistrations.length, selectedEvent?.status]);
+
+  // Decrypt attendance rows for the report view.
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all(eventAttendance.map(decryptAttendanceRow)).then((rows) => {
+      if (!cancelled) setDecryptedAttendance(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [eventAttendance]);
   const totalRegistrations = registrations.length;
   const shareUrl = selectedEvent ? getEventShareUrl(selectedEvent.id) : "";
 
@@ -579,6 +840,221 @@ function App() {
     }
   }
 
+  async function handleCheckInSubmit(event) {
+    event.preventDefault();
+    if (!selectedEvent) {
+      setMessage({ type: "error", text: "Select an event before running check-in." });
+      return;
+    }
+    const trimmedId = checkInForm.uniqueId.trim();
+    if (!trimmedId) {
+      setMessage({ type: "error", text: "Enter the attendee's Unique ID to check in." });
+      return;
+    }
+    setCheckInBusy(true);
+    try {
+      const result = await saveCheckIn({
+        event: selectedEvent,
+        uniqueId: trimmedId,
+        fullName: checkInForm.fullName.trim(),
+      });
+      if (result.status === "duplicate") {
+        const t = result.existing.checkInTime;
+        setCheckInResult({ kind: "duplicate", time: t, masked: result.existing.maskedUniqueId });
+        setMessage({ type: "error", text: `Already checked in at ${formatDateTime(t)}.` });
+        setCheckInBusy(false);
+        return;
+      }
+      if (result.status === "event-closed") {
+        setMessage({ type: "error", text: "Event is closed. Reopen the event to accept check-ins." });
+        setCheckInBusy(false);
+        return;
+      }
+      if (result.status === "walk-in" && !checkInForm.fullName.trim()) {
+        setWalkInOpen(true);
+        setCheckInBusy(false);
+        return;
+      }
+      setCheckInResult({
+        kind: result.status,
+        time: result.record.checkInTime,
+        displayName: result.displayName,
+        masked: result.record.maskedUniqueId,
+      });
+      setCheckInForm({ uniqueId: "", fullName: "" });
+      setMessage({
+        type: "success",
+        text: result.status === "walk-in"
+          ? `Walk-in check-in recorded at ${formatDateTime(result.record.checkInTime)}.`
+          : `${result.displayName || "Attendee"} checked in at ${formatDateTime(result.record.checkInTime)}.`,
+      });
+    } catch (error) {
+      setMessage({ type: "error", text: "Check-in failed. Retry." });
+    } finally {
+      setCheckInBusy(false);
+    }
+  }
+
+  async function handleCheckOutSubmit(event) {
+    event.preventDefault();
+    if (!selectedEvent) {
+      setMessage({ type: "error", text: "Select an event before running checkout." });
+      return;
+    }
+    const trimmedId = checkOutForm.uniqueId.trim();
+    if (!trimmedId) {
+      setMessage({ type: "error", text: "Enter the attendee's Unique ID to check out." });
+      return;
+    }
+    setCheckOutBusy(true);
+    try {
+      const result = await saveCheckOut({
+        event: selectedEvent,
+        uniqueId: trimmedId,
+        fullName: checkOutForm.fullName.trim(),
+      });
+      if (result.status === "duplicate") {
+        const t = result.existing.checkOutTime;
+        setCheckOutResult({ kind: "duplicate", time: t, masked: result.existing.maskedUniqueId });
+        setMessage({ type: "error", text: `Already checked out at ${formatDateTime(t)}.` });
+        setCheckOutBusy(false);
+        return;
+      }
+      setCheckOutResult({
+        kind: result.status,
+        time: result.record.checkOutTime,
+        displayName: result.displayName,
+        masked: result.record.maskedUniqueId,
+      });
+      setCheckOutForm({ uniqueId: "", fullName: "" });
+
+      const blurb = {
+        complete: `${result.displayName || "Attendee"} checked out at ${formatDateTime(result.record.checkOutTime)}.`,
+        "reg-checkout-no-checkin": `Registered attendee checked out without a check-in record.`,
+        "walkin-complete": `Walk-in checkout recorded — they had a check-in earlier.`,
+        "walkin-checkout": `Walk-in checkout only. No prior record for this ID.`,
+      };
+      setMessage({ type: "success", text: blurb[result.status] || "Checkout recorded." });
+    } catch (error) {
+      setMessage({ type: "error", text: "Checkout failed. Retry." });
+    } finally {
+      setCheckOutBusy(false);
+    }
+  }
+
+  async function handleGenerateReport() {
+    if (!selectedEvent) return;
+    setReportBusy(true);
+    try {
+      await computeAttendance(selectedEvent.id);
+      setMessage({ type: "success", text: "Attendance report regenerated from current data." });
+    } catch (error) {
+      setMessage({ type: "error", text: "Report generation failed." });
+    } finally {
+      setReportBusy(false);
+    }
+  }
+
+  async function handleCloseEvent() {
+    if (!selectedEvent) return;
+    const proceed = window.confirm(
+      `Close "${selectedEvent.title}"? This computes the final attendance report and stops accepting new registrations / check-ins.`,
+    );
+    if (!proceed) return;
+    try {
+      await closeEvent(selectedEvent.id);
+      setMessage({ type: "success", text: "Event closed. Attendance report finalized." });
+    } catch (error) {
+      setMessage({ type: "error", text: "Close failed." });
+    }
+  }
+
+  async function handleReopenEvent() {
+    if (!selectedEvent) return;
+    try {
+      await reopenEvent(selectedEvent.id);
+      setMessage({ type: "success", text: "Event reopened. Accepting registrations and check-ins again." });
+    } catch (error) {
+      setMessage({ type: "error", text: "Reopen failed." });
+    }
+  }
+
+  async function handleExportAttendanceCsv() {
+    if (!selectedEvent || !eventAttendance.length) return;
+    const decrypted = await Promise.all(eventAttendance.map(decryptAttendanceRow));
+    const header = ["Name", "Unique ID", "Walk-In", "Registration Time", "Check-In Time", "Checkout Time", "Status"];
+    const rows = decrypted.map((row) => [
+      row.fullName,
+      row.uniqueId,
+      row.walkInFlag ? "Yes" : "No",
+      row.registrationTime || "",
+      row.checkInTime || "",
+      row.checkOutTime || "",
+      STATUS_LABEL[row.statusCode] || row.statusCode,
+    ]);
+    const csv = [header, ...rows]
+      .map((cols) => cols.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${selectedEvent.clientName}-${selectedEvent.title}-attendance.csv`.replace(/\s+/g, "-").toLowerCase();
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportAttendancePdf() {
+    if (!selectedEvent || !eventAttendance.length) return;
+    const styles = `
+      body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;color:#0A0A0A;}
+      h1{font-size:18px;margin:0 0 4px;}
+      .meta{font-size:11px;color:#555;margin-bottom:16px;}
+      table{width:100%;border-collapse:collapse;font-size:11px;}
+      th,td{border:1px solid #ccc;padding:6px 8px;text-align:left;}
+      th{background:#FFF1E8;color:#3F3F46;}
+      .summary{margin:12px 0;font-size:12px;}
+      .summary span{margin-right:16px;}
+    `;
+    const summaryRow = `
+      <div class="summary">
+        <span>Registrations: <b>${eventRegistrations.length}</b></span>
+        <span>Check-Ins: <b>${eventCheckIns.length}</b></span>
+        <span>Checkouts: <b>${eventCheckOuts.length}</b></span>
+        <span>Walk-Ins: <b>${walkInCount}</b></span>
+        <span>No-Shows: <b>${noShowCount}</b></span>
+        <span>Completion: <b>${completionRate}%</b></span>
+      </div>`;
+    const rowsHtml = decryptedAttendance
+      .map(
+        (row) => `<tr>
+          <td>${escapeHtml(row.fullName || row.maskedFullName || "")}</td>
+          <td>${escapeHtml(row.uniqueId || row.maskedUniqueId || "")}</td>
+          <td>${row.walkInFlag ? "Yes" : "No"}</td>
+          <td>${row.registrationTime ? formatDateTime(row.registrationTime) : ""}</td>
+          <td>${row.checkInTime ? formatDateTime(row.checkInTime) : ""}</td>
+          <td>${row.checkOutTime ? formatDateTime(row.checkOutTime) : ""}</td>
+          <td>${escapeHtml(STATUS_LABEL[row.statusCode] || row.statusCode)}</td>
+        </tr>`,
+      )
+      .join("");
+    const html = `<!doctype html><html><head><title>${escapeHtml(selectedEvent.title)} — Attendance</title><style>${styles}</style></head><body>
+      <h1>${escapeHtml(selectedEvent.title)}</h1>
+      <div class="meta">${escapeHtml(selectedEvent.clientName)} · ${formatDate(selectedEvent.eventDate)} · ${escapeHtml(selectedEvent.location)}</div>
+      ${summaryRow}
+      <table>
+        <thead><tr><th>Name</th><th>Unique ID</th><th>Walk-In</th><th>Registration</th><th>Check-In</th><th>Checkout</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <script>window.onload=function(){window.print();}</script>
+    </body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
   function handleSeedDemoEvent() {
     seedScbDemoEvent()
       .then((seededEvent) => {
@@ -597,7 +1073,50 @@ function App() {
       });
   }
 
-  if (participantMode) {
+  if (participantMode === "checkin") {
+    return (
+      <ParticipantCheckIn
+        event={selectedEvent}
+        form={checkInForm}
+        setForm={setCheckInForm}
+        result={checkInResult}
+        busy={checkInBusy}
+        onSubmit={handleCheckInSubmit}
+        walkInOpen={walkInOpen}
+        setWalkInOpen={setWalkInOpen}
+        onWalkInConfirm={async (name) => {
+          setCheckInForm((f) => ({ ...f, fullName: name }));
+          setWalkInOpen(false);
+          await saveCheckIn({ event: selectedEvent, uniqueId: checkInForm.uniqueId.trim(), fullName: name }).then((result) => {
+            if (result.status !== "duplicate") {
+              setCheckInResult({
+                kind: "walk-in",
+                time: result.record.checkInTime,
+                displayName: name,
+                masked: result.record.maskedUniqueId,
+              });
+              setCheckInForm({ uniqueId: "", fullName: "" });
+            }
+          });
+        }}
+      />
+    );
+  }
+
+  if (participantMode === "checkout") {
+    return (
+      <ParticipantCheckOut
+        event={selectedEvent}
+        form={checkOutForm}
+        setForm={setCheckOutForm}
+        result={checkOutResult}
+        busy={checkOutBusy}
+        onSubmit={handleCheckOutSubmit}
+      />
+    );
+  }
+
+  if (participantMode === "register") {
     return (
       <div className="gform-page">
         <main className="gform-shell">
@@ -719,8 +1238,8 @@ function App() {
       heading: "Operate",
       items: [
         { id: "registrations", label: "Registrations", icon: UserPlus, ready: true },
-        { id: "checkin", label: "Check-In", icon: ClipboardList, ready: false },
-        { id: "checkout", label: "Checkout", icon: LogOut, ready: false },
+        { id: "checkin", label: "Check-In", icon: ClipboardList, ready: true },
+        { id: "checkout", label: "Checkout", icon: LogOut, ready: true },
         { id: "qrshare", label: "QR & Share", icon: QrCode, ready: true },
       ],
     },
@@ -728,7 +1247,7 @@ function App() {
       heading: "Insights",
       items: [
         { id: "dashboard", label: "Dashboard", icon: BarChart3, ready: true },
-        { id: "reports", label: "Reports", icon: FileText, ready: false },
+        { id: "reports", label: "Reports", icon: FileText, ready: true },
       ],
     },
     {
@@ -1032,17 +1551,112 @@ function App() {
             <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
-                  <CardTitle>Check-In</CardTitle>
+                  <CardTitle>Check-In Desk</CardTitle>
                   <CardDescription>
-                    Single-field form for the venue desk. Type or scan the Unique ID, system marks the attendee Checked In. Coming next.
+                    Single-field form for the venue desk. Type or scan the attendee's Unique ID. Walk-ins captured separately.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flow-step"><div className="flow-icon"><ClipboardList className="h-4 w-4" /></div><div><p className="flow-title">Match on Event Code + Unique ID</p><p className="flow-description">Found → green confirmation with name and timestamp. Not found → walk-in path.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><ClipboardList className="h-4 w-4" /></div><div><p className="flow-title">Duplicate guard</p><p className="flow-description">Second check-in on the same ID shows "Already checked in at HH:MM".</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><ClipboardList className="h-4 w-4" /></div><div><p className="flow-title">Walk-in capture</p><p className="flow-description">Unregistered attendees are captured with status Walk-In, Check-In Only.</p></div></div>
+                <CardContent className="space-y-5">
+                  {selectedEvent ? (
+                    <>
+                      <div className="summary-grid">
+                        <div className="summary-item"><span>Event</span><strong>{selectedEvent.title}</strong></div>
+                        <div className="summary-item"><span>Status</span><strong>{(selectedEvent.status || "active").toUpperCase()}</strong></div>
+                        <div className="summary-item"><span>Registered</span><strong>{eventRegistrations.length}</strong></div>
+                        <div className="summary-item"><span>Checked In</span><strong>{eventCheckIns.length}</strong></div>
+                      </div>
+
+                      <form className="space-y-4" onSubmit={handleCheckInSubmit}>
+                        <div className="field-grid">
+                          <div className="space-y-2">
+                            <Label htmlFor="ci-uniqueid">Attendee Unique ID</Label>
+                            <Input
+                              id="ci-uniqueid"
+                              autoFocus
+                              autoComplete="off"
+                              placeholder="SCB-EMP-1042"
+                              value={checkInForm.uniqueId}
+                              onChange={(e) => setCheckInForm((f) => ({ ...f, uniqueId: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="ci-walkinname">Walk-In Name (only if no registration)</Label>
+                            <Input
+                              id="ci-walkinname"
+                              placeholder="leave blank for registered attendees"
+                              value={checkInForm.fullName}
+                              onChange={(e) => setCheckInForm((f) => ({ ...f, fullName: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                        <Button type="submit" className="cta-button" disabled={checkInBusy}>
+                          {checkInBusy ? "Checking in..." : "Record Check-In"}
+                        </Button>
+                      </form>
+
+                      {checkInResult && checkInResult.kind !== "duplicate" && (
+                        <Alert className="status-alert border-emerald-300 bg-emerald-50">
+                          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                          <AlertDescription className="text-emerald-900">
+                            {checkInResult.kind === "walk-in"
+                              ? `Walk-in recorded at ${formatDateTime(checkInResult.time)}.`
+                              : `${checkInResult.displayName || "Attendee"} checked in at ${formatDateTime(checkInResult.time)}.`}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {checkInResult && checkInResult.kind === "duplicate" && (
+                        <Alert className="status-alert border-red-300 bg-red-50">
+                          <XCircle className="h-5 w-5 text-red-600" />
+                          <AlertDescription className="text-red-900">
+                            Already checked in at {formatDateTime(checkInResult.time)}.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      <div className="link-row">
+                        <div className="link-box">{getCheckInUrl(selectedEvent.id)}</div>
+                        <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckInUrl(selectedEvent.id))}>
+                          <Link2 className="mr-2 h-4 w-4" />
+                          Copy Desk URL
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-state">Select an event to run check-in.</div>
+                  )}
                 </CardContent>
               </Card>
+
+              {selectedEvent && eventCheckIns.length > 0 && (
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle>Check-Ins Log</CardTitle>
+                    <CardDescription>Most recent first. Unique IDs masked for privacy.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Unique ID</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Walk-In</TableHead>
+                          <TableHead>Time</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {eventCheckIns.map((row) => (
+                          <TableRow key={row.id}>
+                            <TableCell>{row.maskedUniqueId}</TableCell>
+                            <TableCell>{row.maskedFullName || "—"}</TableCell>
+                            <TableCell>{row.walkInFlag ? "Yes" : "No"}</TableCell>
+                            <TableCell>{formatDateTime(row.checkInTime)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
 
@@ -1050,17 +1664,110 @@ function App() {
             <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
-                  <CardTitle>Checkout</CardTitle>
+                  <CardTitle>Checkout Desk</CardTitle>
                   <CardDescription>
-                    End-of-event exit form. Closes the attendance loop and feeds the post-event report. Coming next.
+                    End-of-event exit form. Closes the attendance loop. Walk-in-only checkouts captured separately.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flow-step"><div className="flow-icon"><LogOut className="h-4 w-4" /></div><div><p className="flow-title">Lookup against registration + check-in</p><p className="flow-description">Match found → record Checked Out timestamp. No check-in but registered → status Registered + Checked Out, No Check-In.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><LogOut className="h-4 w-4" /></div><div><p className="flow-title">Walk-in checkout</p><p className="flow-description">Attendees that only appear at exit are captured as Walk-In Checkout for the report.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><LogOut className="h-4 w-4" /></div><div><p className="flow-title">Status engine</p><p className="flow-description">After the event closes, every Unique ID gets a status: COMPLETE, REG_CHECKIN, REG_ONLY, REG_CHECKOUT, WALKIN_COMPLETE, WALKIN_CHECKIN, WALKIN_CHECKOUT, NO_SHOW.</p></div></div>
+                <CardContent className="space-y-5">
+                  {selectedEvent ? (
+                    <>
+                      <div className="summary-grid">
+                        <div className="summary-item"><span>Event</span><strong>{selectedEvent.title}</strong></div>
+                        <div className="summary-item"><span>Checked In</span><strong>{eventCheckIns.length}</strong></div>
+                        <div className="summary-item"><span>Checked Out</span><strong>{eventCheckOuts.length}</strong></div>
+                        <div className="summary-item"><span>Walk-Ins</span><strong>{walkInCount}</strong></div>
+                      </div>
+
+                      <form className="space-y-4" onSubmit={handleCheckOutSubmit}>
+                        <div className="field-grid">
+                          <div className="space-y-2">
+                            <Label htmlFor="co-uniqueid">Attendee Unique ID</Label>
+                            <Input
+                              id="co-uniqueid"
+                              autoFocus
+                              autoComplete="off"
+                              placeholder="SCB-EMP-1042"
+                              value={checkOutForm.uniqueId}
+                              onChange={(e) => setCheckOutForm((f) => ({ ...f, uniqueId: e.target.value }))}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="co-walkinname">Walk-In Name (if no record)</Label>
+                            <Input
+                              id="co-walkinname"
+                              placeholder="leave blank if attendee has a record"
+                              value={checkOutForm.fullName}
+                              onChange={(e) => setCheckOutForm((f) => ({ ...f, fullName: e.target.value }))}
+                            />
+                          </div>
+                        </div>
+                        <Button type="submit" className="cta-button" disabled={checkOutBusy}>
+                          {checkOutBusy ? "Checking out..." : "Record Checkout"}
+                        </Button>
+                      </form>
+
+                      {checkOutResult && checkOutResult.kind !== "duplicate" && (
+                        <Alert className="status-alert border-emerald-300 bg-emerald-50">
+                          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                          <AlertDescription className="text-emerald-900">
+                            Checkout recorded at {formatDateTime(checkOutResult.time)}.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {checkOutResult && checkOutResult.kind === "duplicate" && (
+                        <Alert className="status-alert border-red-300 bg-red-50">
+                          <XCircle className="h-5 w-5 text-red-600" />
+                          <AlertDescription className="text-red-900">
+                            Already checked out at {formatDateTime(checkOutResult.time)}.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
+                      <div className="link-row">
+                        <div className="link-box">{getCheckOutUrl(selectedEvent.id)}</div>
+                        <Button type="button" variant="outline" onClick={() => navigator.clipboard.writeText(getCheckOutUrl(selectedEvent.id))}>
+                          <Link2 className="mr-2 h-4 w-4" />
+                          Copy Desk URL
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-state">Select an event to run checkout.</div>
+                  )}
                 </CardContent>
               </Card>
+
+              {selectedEvent && eventCheckOuts.length > 0 && (
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle>Checkouts Log</CardTitle>
+                    <CardDescription>Most recent first.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Unique ID</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Walk-In</TableHead>
+                          <TableHead>Time</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {eventCheckOuts.map((row) => (
+                          <TableRow key={row.id}>
+                            <TableCell>{row.maskedUniqueId}</TableCell>
+                            <TableCell>{row.maskedFullName || "—"}</TableCell>
+                            <TableCell>{row.walkInFlag ? "Yes" : "No"}</TableCell>
+                            <TableCell>{formatDateTime(row.checkOutTime)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
 
@@ -1068,17 +1775,129 @@ function App() {
             <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
-                  <CardTitle>Reports</CardTitle>
+                  <CardTitle>Post-Event Report</CardTitle>
                   <CardDescription>
-                    Post-event attendance report with status flags, exportable as CSV and PDF. Coming next.
+                    Status engine assigns one of 8 codes to every Unique ID. Recompute manually or close the event to lock the final report.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flow-step"><div className="flow-icon"><FileText className="h-4 w-4" /></div><div><p className="flow-title">Summary block</p><p className="flow-description">Total Registrations, Check-Ins, Checkouts, Walk-Ins, No-Shows, Completion Rate.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><FileText className="h-4 w-4" /></div><div><p className="flow-title">Per-attendee detail</p><p className="flow-description">Name, Unique ID, Registration Time, Check-In Time, Checkout Time, Status. Filter by status, export CSV / PDF.</p></div></div>
-                  <div className="flow-step"><div className="flow-icon"><FileText className="h-4 w-4" /></div><div><p className="flow-title">Global trend</p><p className="flow-description">Last 6 events: attendance rate trend across the program.</p></div></div>
+                <CardContent className="space-y-4">
+                  {selectedEvent ? (
+                    <>
+                      <div className="summary-grid">
+                        <div className="summary-item"><span>Event</span><strong>{selectedEvent.title}</strong></div>
+                        <div className="summary-item"><span>Status</span><strong>{(selectedEvent.status || "active").toUpperCase()}</strong></div>
+                        <div className="summary-item"><span>Date</span><strong>{formatDate(selectedEvent.eventDate)}</strong></div>
+                        <div className="summary-item"><span>Completion Rate</span><strong>{completionRate}%</strong></div>
+                      </div>
+
+                      <div className="summary-grid">
+                        <div className="summary-item"><span>Registrations</span><strong>{eventRegistrations.length}</strong></div>
+                        <div className="summary-item"><span>Check-Ins</span><strong>{eventCheckIns.length}</strong></div>
+                        <div className="summary-item"><span>Checkouts</span><strong>{eventCheckOuts.length}</strong></div>
+                        <div className="summary-item"><span>Walk-Ins</span><strong>{walkInCount}</strong></div>
+                        <div className="summary-item"><span>No-Shows</span><strong>{noShowCount}</strong></div>
+                        <div className="summary-item"><span>Complete</span><strong>{completeCount}</strong></div>
+                      </div>
+
+                      <div className="action-row">
+                        <Button type="button" onClick={handleGenerateReport} disabled={reportBusy}>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          {reportBusy ? "Computing..." : "Regenerate Report"}
+                        </Button>
+                        <Button type="button" variant="outline" onClick={handleExportAttendanceCsv} disabled={!eventAttendance.length}>
+                          <Download className="mr-2 h-4 w-4" />
+                          Export CSV
+                        </Button>
+                        <Button type="button" variant="outline" onClick={handleExportAttendancePdf} disabled={!eventAttendance.length}>
+                          <FileText className="mr-2 h-4 w-4" />
+                          Export PDF
+                        </Button>
+                        {selectedEvent.status !== "closed" ? (
+                          <Button type="button" variant="outline" onClick={handleCloseEvent}>
+                            <LogOut className="mr-2 h-4 w-4" />
+                            Close Event
+                          </Button>
+                        ) : (
+                          <Button type="button" variant="outline" onClick={handleReopenEvent}>
+                            <PlayCircle className="mr-2 h-4 w-4" />
+                            Reopen Event
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="field-grid">
+                        <div className="space-y-2">
+                          <Label>Filter by status</Label>
+                          <Select value={reportFilter} onValueChange={setReportFilter}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ALL">All Statuses</SelectItem>
+                              {Object.entries(STATUS_LABEL).map(([code, label]) => (
+                                <SelectItem key={code} value={code}>{label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="empty-state">Select an event to view its report.</div>
+                  )}
                 </CardContent>
               </Card>
+
+              {selectedEvent && eventAttendance.length > 0 && (
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle>Attendee Detail</CardTitle>
+                    <CardDescription>
+                      Names and IDs decrypted in-browser for the report. {privacyMode ? "Showing masked values." : "Showing decrypted values."}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="action-row mb-2">
+                      <Button type="button" variant="outline" onClick={() => setPrivacyMode((m) => !m)}>
+                        {privacyMode ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
+                        {privacyMode ? "Reveal Names" : "Mask Names"}
+                      </Button>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Unique ID</TableHead>
+                          <TableHead>Registration</TableHead>
+                          <TableHead>Check-In</TableHead>
+                          <TableHead>Checkout</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {eventAttendance
+                          .filter((row) => reportFilter === "ALL" || row.statusCode === reportFilter)
+                          .map((row, idx) => {
+                            const decrypted = decryptedAttendance[idx];
+                            const showPlain = !privacyMode && decrypted;
+                            return (
+                              <TableRow key={row.id}>
+                                <TableCell>{showPlain ? decrypted.fullName : row.maskedFullName || "(masked)"}</TableCell>
+                                <TableCell>{showPlain ? decrypted.uniqueId : row.maskedUniqueId}</TableCell>
+                                <TableCell>{row.registrationTime ? formatDateTime(row.registrationTime) : "—"}</TableCell>
+                                <TableCell>{row.checkInTime ? formatDateTime(row.checkInTime) : "—"}</TableCell>
+                                <TableCell>{row.checkOutTime ? formatDateTime(row.checkOutTime) : "—"}</TableCell>
+                                <TableCell>
+                                  <Badge variant="outline" className={statusPillClass(row.statusCode)}>
+                                    {STATUS_LABEL[row.statusCode] || row.statusCode}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </TabsContent>
 
@@ -1205,43 +2024,77 @@ function App() {
                     {selectedEvent ? (
                       <>
                         <div className="summary-grid">
-                          <div className="summary-item">
-                            <span>Client</span>
-                            <strong>{selectedEvent.clientName}</strong>
-                          </div>
-                          <div className="summary-item">
-                            <span>Event Date</span>
-                            <strong>{formatDate(selectedEvent.eventDate)}</strong>
-                          </div>
-                          <div className="summary-item">
-                            <span>Retention Until</span>
-                            <strong>{formatDate(selectedEvent.expiresAt)}</strong>
-                          </div>
-                          <div className="summary-item">
-                            <span>Duplicate Rule</span>
-                            <strong>{duplicateFieldLabels[selectedEvent.duplicateField]}</strong>
-                          </div>
+                          <div className="summary-item"><span>Client</span><strong>{selectedEvent.clientName}</strong></div>
+                          <div className="summary-item"><span>Event Date</span><strong>{formatDate(selectedEvent.eventDate)}</strong></div>
+                          <div className="summary-item"><span>Status</span><strong>{(selectedEvent.status || "active").toUpperCase()}</strong></div>
+                          <div className="summary-item"><span>Duplicate Rule</span><strong>{duplicateFieldLabels[selectedEvent.duplicateField]}</strong></div>
+                        </div>
+
+                        <div className="summary-grid">
+                          <div className="summary-item"><span>Registrations</span><strong>{eventRegistrations.length}</strong></div>
+                          <div className="summary-item"><span>Check-Ins</span><strong>{eventCheckIns.length}</strong></div>
+                          <div className="summary-item"><span>Checkouts</span><strong>{eventCheckOuts.length}</strong></div>
+                          <div className="summary-item"><span>Walk-Ins</span><strong>{walkInCount}</strong></div>
+                          <div className="summary-item"><span>No-Shows</span><strong>{noShowCount}</strong></div>
+                          <div className="summary-item"><span>Completion</span><strong>{completionRate}%</strong></div>
                         </div>
 
                         <div className="action-row">
                           <Button type="button" onClick={handleExportSelectedEvent}>
                             <Download className="mr-2 h-4 w-4" />
-                            Export CSV
+                            Export Registrations CSV
                           </Button>
                           <Button type="button" variant="outline" onClick={() => setPrivacyMode((current) => !current)}>
                             {privacyMode ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
                             {decryptingReveal ? "Decrypting..." : privacyMode ? "Reveal (Decrypt)" : "Mask Off"}
+                          </Button>
+                          <Button type="button" variant="outline" onClick={() => setActiveTab("reports")}>
+                            <FileText className="mr-2 h-4 w-4" />
+                            View Report
                           </Button>
                           <Button type="button" variant="outline" onClick={handleDeleteEvent}>
                             <Trash2 className="mr-2 h-4 w-4" />
                             Purge Event
                           </Button>
                         </div>
-
                       </>
                     ) : (
                       <div className="empty-state">
                         Create or select an event to see the dashboard, exports, and purge controls.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle>Across All Events</CardTitle>
+                    <CardDescription>Program-level view for the month and the last 6 events.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="summary-grid">
+                      <div className="summary-item"><span>Events This Month</span><strong>{globalStats.eventsThisMonth}</strong></div>
+                      <div className="summary-item"><span>Registrations This Month</span><strong>{globalStats.regsThisMonth}</strong></div>
+                      <div className="summary-item"><span>Total Events</span><strong>{events.length}</strong></div>
+                      <div className="summary-item"><span>Total Registrations</span><strong>{registrations.length}</strong></div>
+                    </div>
+                    {globalStats.trend.length > 0 && (
+                      <div>
+                        <Label>Last 6 events — completion rate</Label>
+                        <div className="trend-list">
+                          {globalStats.trend.map((row) => (
+                            <div key={row.id} className="trend-row">
+                              <div className="trend-meta">
+                                <strong>{row.title}</strong>
+                                <span>{formatDate(row.date)}</span>
+                              </div>
+                              <div className="trend-bar-wrap">
+                                <div className="trend-bar" style={{ width: `${row.rate}%` }} />
+                                <span className="trend-pct">{row.rate}%</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </CardContent>

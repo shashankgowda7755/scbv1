@@ -1,11 +1,9 @@
 {
   "indexes": [],
   "fieldOverrides": [
-    {
-      "collectionGroup": "registrations",
-      "fieldPath": "expiresAt",
-      "ttl": true,
-      "indexes": []
-    }
+    { "collectionGroup": "registrations", "fieldPath": "expiresAt", "ttl": true, "indexes": [] },
+    { "collectionGroup": "checkins", "fieldPath": "expiresAt", "ttl": true, "indexes": [] },
+    { "collectionGroup": "checkouts", "fieldPath": "expiresAt", "ttl": true, "indexes": [] },
+    { "collectionGroup": "attendance", "fieldPath": "expiresAt", "ttl": true, "indexes": [] }
   ]
 }
