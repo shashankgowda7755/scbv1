@@ -29,7 +29,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.7-participant-lite-2026-05-25";
+const BUILD_STAMP = "v2.8-current-btn-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -2433,9 +2433,15 @@ function App() {
                               <TableCell>{regCount}</TableCell>
                               <TableCell>
                                 <div className="action-row">
-                                  <Button type="button" variant="outline" size="sm" onClick={() => setSelectedEventId(ev.id)}>
-                                    Activate
-                                  </Button>
+                                  {isActive ? (
+                                    <Button type="button" size="sm" disabled className="cursor-default opacity-70">
+                                      Current
+                                    </Button>
+                                  ) : (
+                                    <Button type="button" size="sm" onClick={() => setSelectedEventId(ev.id)}>
+                                      Make Current
+                                    </Button>
+                                  )}
                                   <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedEventId(ev.id); setActiveTab("qrshare"); }}>
                                     <QrCode className="mr-1 h-3.5 w-3.5" /> QR
                                   </Button>
