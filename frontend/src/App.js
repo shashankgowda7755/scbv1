@@ -26,8 +26,9 @@ import {
   STATUS_LABEL,
 } from "@/lib/event-store";
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
+import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers, hasAnyDemoUser } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.1-2026-05-25";
+const BUILD_STAMP = "v2.2-auth-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -383,10 +384,129 @@ function ParticipantCheckOut({ event, form, setForm, result, busy, onSubmit }) {
   );
 }
 
+function LoginScreen({ storeMode, onSignedIn }) {
+  const [mode, setMode] = useState("signin"); // signin | bootstrap
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [bootstrapAllowed, setBootstrapAllowed] = useState(false);
+
+  useEffect(() => {
+    // Detect whether a bootstrap path should be offered:
+    //   Demo mode: only if no demo users have been created yet.
+    //   Firebase mode: always offer — Firestore rules + Console invite are the real gate.
+    if (storeMode === "firebase") {
+      setBootstrapAllowed(true);
+    } else {
+      setBootstrapAllowed(!hasAnyDemoUser());
+    }
+  }, [storeMode]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setErr("");
+    try {
+      if (mode === "signin") {
+        await signIn(email, password);
+        onSignedIn?.();
+      } else {
+        await createAdminUser({ email, password, createdBy: "bootstrap" });
+        await signIn(email, password);
+        onSignedIn?.();
+      }
+    } catch (e2) {
+      setErr(e2?.message || String(e2));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="scb-login-wrap">
+      <div className="scb-login-card">
+        <div className="scb-login-brand">
+          <div className="scb-sidebar-logo">SCB</div>
+          <div>
+            <div className="scb-sidebar-name">Event Platform</div>
+            <div className="scb-sidebar-sub">Internal admin sign-in</div>
+          </div>
+        </div>
+
+        <div className="scb-login-tabs">
+          <button
+            type="button"
+            className={`scb-login-tab ${mode === "signin" ? "scb-login-tab-active" : ""}`}
+            onClick={() => { setMode("signin"); setErr(""); }}
+          >
+            Sign in
+          </button>
+          {bootstrapAllowed && (
+            <button
+              type="button"
+              className={`scb-login-tab ${mode === "bootstrap" ? "scb-login-tab-active" : ""}`}
+              onClick={() => { setMode("bootstrap"); setErr(""); }}
+            >
+              First-time setup
+            </button>
+          )}
+        </div>
+
+        <form onSubmit={submit} className="scb-login-form">
+          <Label htmlFor="login-email">Work email</Label>
+          <Input
+            id="login-email"
+            type="email"
+            autoComplete="username"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            placeholder="you@tndwwt.org"
+          />
+          <Label htmlFor="login-password">Password</Label>
+          <Input
+            id="login-password"
+            type="password"
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={mode === "bootstrap" ? 8 : undefined}
+            placeholder={mode === "bootstrap" ? "Min 8 characters" : ""}
+          />
+
+          {err && (
+            <Alert className="status-alert border-red-300 bg-red-50">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <AlertDescription className="text-red-900">{err}</AlertDescription>
+            </Alert>
+          )}
+
+          <Button type="submit" disabled={busy} className="w-full">
+            {busy ? "Working..." : mode === "signin" ? "Sign in" : "Create first admin"}
+          </Button>
+        </form>
+
+        <p className="scb-login-foot">
+          Access restricted to Communitree + SCB internal team.
+          {storeMode === "demo" && " Running in demo mode — credentials stored in this browser only."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [storeMode, setStoreMode] = useState(getStoreMode());
   const [fallbackBanner, setFallbackBanner] = useState("");
   const participantMode = getParticipantMode();
+  const [authUser, setAuthUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [userForm, setUserForm] = useState({ email: "", password: "" });
+  const [userBusy, setUserBusy] = useState(false);
+  const [userMsg, setUserMsg] = useState({ type: "", text: "" });
   const [events, setEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [checkIns, setCheckIns] = useState([]);
@@ -449,6 +569,46 @@ function App() {
     });
     return () => offMode();
   }, []);
+
+  // Subscribe to auth state. Participant mode bypasses login entirely.
+  useEffect(() => {
+    if (participantMode) {
+      setAuthReady(true);
+      return undefined;
+    }
+    const unsub = observeAuth((user) => {
+      setAuthUser(user);
+      setAuthReady(true);
+    });
+    return () => { if (typeof unsub === "function") unsub(); };
+  }, [participantMode]);
+
+  // Reload admin users when signed in.
+  useEffect(() => {
+    if (!authUser) { setAdminUsers([]); return; }
+    listAdminUsers().then(setAdminUsers).catch(() => setAdminUsers([]));
+  }, [authUser]);
+
+  async function handleAddAdminUser(e) {
+    e?.preventDefault?.();
+    setUserBusy(true);
+    setUserMsg({ type: "", text: "" });
+    try {
+      await createAdminUser({ email: userForm.email, password: userForm.password, createdBy: authUser?.email || "" });
+      setUserForm({ email: "", password: "" });
+      setUserMsg({ type: "success", text: `Added ${userForm.email.trim().toLowerCase()}.` });
+      const fresh = await listAdminUsers();
+      setAdminUsers(fresh);
+    } catch (e2) {
+      setUserMsg({ type: "error", text: e2?.message || String(e2) });
+    } finally {
+      setUserBusy(false);
+    }
+  }
+
+  async function handleSignOut() {
+    try { await signOutUser(); } catch {}
+  }
 
   // Auto-dismiss success/error messages after 6s
   useEffect(() => {
@@ -1292,6 +1452,7 @@ function App() {
       heading: "Trust",
       items: [
         { id: "security", label: "Security", icon: ShieldCheck, ready: true },
+        { id: "users", label: "Admin Users", icon: KeyRound, ready: true },
       ],
     },
   ];
@@ -1299,6 +1460,14 @@ function App() {
   const activeLabel = navSections
     .flatMap((section) => section.items)
     .find((item) => item.id === activeTab)?.label || "Events";
+
+  // Auth gate: admin shell requires sign-in. Participant routes returned earlier.
+  if (!authReady) {
+    return <div className="scb-login-wrap"><div className="scb-login-card"><p>Loading...</p></div></div>;
+  }
+  if (!authUser) {
+    return <LoginScreen storeMode={storeMode} onSignedIn={() => {}} />;
+  }
 
   return (
     <div className="scb-shell">
@@ -1345,6 +1514,15 @@ function App() {
               <Database className="h-3.5 w-3.5" />
               {storeMode === "firebase" ? "Firestore live" : "Demo mode"}
             </Badge>
+            {authUser && (
+              <div className="scb-sidebar-user">
+                <span className="scb-sidebar-user-label">Signed in</span>
+                <strong title={authUser.email}>{authUser.email}</strong>
+                <button type="button" className="scb-signout-btn" onClick={handleSignOut}>
+                  <LogOut className="h-3.5 w-3.5" /> Sign out
+                </button>
+              </div>
+            )}
             <button type="button" className="scb-reset-btn" onClick={handleHardReset} title="Wipe local data and reload">
               Reset
             </button>
@@ -2319,6 +2497,89 @@ function App() {
                 </CardContent>
               </Card>
 
+            </div>
+          </TabsContent>
+
+          <TabsContent value="users">
+            <div className="content-grid">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Add Admin User</CardTitle>
+                  <CardDescription>
+                    Anyone added here can sign into this panel. Use work emails only. Min 8-char password.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form onSubmit={handleAddAdminUser} className="space-y-3">
+                    <div>
+                      <Label htmlFor="new-user-email">Email</Label>
+                      <Input
+                        id="new-user-email"
+                        type="email"
+                        value={userForm.email}
+                        onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))}
+                        required
+                        placeholder="staffer@tndwwt.org"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="new-user-password">Temporary password</Label>
+                      <Input
+                        id="new-user-password"
+                        type="text"
+                        value={userForm.password}
+                        onChange={(e) => setUserForm((f) => ({ ...f, password: e.target.value }))}
+                        required
+                        minLength={8}
+                        placeholder="Min 8 characters. Share with the user securely."
+                      />
+                    </div>
+                    {userMsg.text && (
+                      <Alert className={`status-alert ${userMsg.type === "error" ? "border-red-300 bg-red-50" : "border-emerald-300 bg-emerald-50"}`}>
+                        {userMsg.type === "error" ? <AlertTriangle className="h-5 w-5 text-red-600" /> : <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
+                        <AlertDescription className={userMsg.type === "error" ? "text-red-900" : "text-emerald-900"}>{userMsg.text}</AlertDescription>
+                      </Alert>
+                    )}
+                    <Button type="submit" disabled={userBusy}>
+                      {userBusy ? "Creating..." : "Add admin user"}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Existing Admin Users</CardTitle>
+                  <CardDescription>{adminUsers.length} {adminUsers.length === 1 ? "user" : "users"} can sign in.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {adminUsers.length === 0 ? (
+                    <p className="text-sm text-gray-500">No admin user records yet. Add one above.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Created</TableHead>
+                          <TableHead>By</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {adminUsers.map((u) => (
+                          <TableRow key={u.uid}>
+                            <TableCell><strong>{u.email}</strong></TableCell>
+                            <TableCell>{u.createdAt ? new Date(u.createdAt).toLocaleString() : "—"}</TableCell>
+                            <TableCell className="text-gray-500">{u.createdBy || "—"}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                  <p className="text-xs text-gray-500 mt-3">
+                    To remove a user, open Firebase Console → Authentication → Users, then delete the row in the <code>users</code> collection. (Removal UI in next release.)
+                  </p>
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
         </Tabs>

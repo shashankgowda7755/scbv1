@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: process.env.REACT_APP_FIREBASE_API_KEY,
@@ -36,9 +37,11 @@ let _fallbackReason = "";
 const listeners = new Set();
 
 let firestoreDb = null;
+let firebaseAuth = null;
 if (configOk) {
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
   firestoreDb = getFirestore(app);
+  firebaseAuth = getAuth(app);
 }
 
 export const firebaseMode = _mode; // legacy const for first-paint reads
@@ -72,4 +75,4 @@ export function onFirebaseModeChange(cb) {
   return () => listeners.delete(cb);
 }
 
-export { firestoreDb, firebaseConfig };
+export { firestoreDb, firebaseAuth, firebaseConfig };

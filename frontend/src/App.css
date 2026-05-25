@@ -276,6 +276,105 @@ body {
   margin: 0;
 }
 
+.scb-sidebar-user {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--orange-soft);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+}
+.scb-sidebar-user-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--gray-500);
+  font-weight: 600;
+}
+.scb-sidebar-user strong {
+  font-size: 0.75rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scb-signout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.3rem;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: var(--ink);
+  color: var(--paper);
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+.scb-signout-btn:hover { background: var(--orange-deep); }
+
+.scb-login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  padding: 2rem 1rem;
+}
+.scb-login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--paper);
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  padding: 1.75rem;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.06);
+}
+.scb-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.25rem;
+}
+.scb-login-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+.scb-login-tab {
+  background: transparent;
+  border: 0;
+  padding: 0.55rem 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--gray-500);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.scb-login-tab:hover { color: var(--ink); }
+.scb-login-tab-active {
+  color: var(--orange-deep);
+  border-bottom-color: var(--orange);
+}
+.scb-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.scb-login-form button[type="submit"] { margin-top: 0.5rem; }
+.scb-login-foot {
+  margin-top: 1rem;
+  font-size: 0.72rem;
+  color: var(--gray-500);
+  line-height: 1.5;
+}
+
 .scb-reset-btn {
   margin-top: 0.5rem;
   width: 100%;

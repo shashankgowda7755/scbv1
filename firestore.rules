@@ -82,5 +82,12 @@ service cloud.firestore {
       allow read: if true;
       allow create, update, delete: if true;
     }
+
+    // Admin user directory. Only logged-in admins can read or write.
+    // The auth user is the gate; this collection just mirrors Firebase Auth users
+    // so the in-app Users page can list them (client SDK can't enumerate auth users).
+    match /users/{userId} {
+      allow read, create, update, delete: if request.auth != null;
+    }
   }
 }
