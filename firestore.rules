@@ -30,6 +30,11 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/events/$(eventId)).data.status == 'active';
     }
 
+    function isAdmin() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     match /events/{eventId} {
       allow read: if true;
       allow create, update, delete: if true;
@@ -86,8 +91,11 @@ service cloud.firestore {
     // Admin user directory. Only logged-in admins can read or write.
     // The auth user is the gate; this collection just mirrors Firebase Auth users
     // so the in-app Users page can list them (client SDK can't enumerate auth users).
+    // Admin allowlist. Self-read so signIn() can check own membership unauthenticated-to-firestore-perspective right after auth.
+    // Read of other docs and all writes require an existing admin (existing /users doc).
     match /users/{userId} {
-      allow read, create, update, delete: if request.auth != null;
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      allow create, update, delete: if isAdmin();
     }
   }
 }

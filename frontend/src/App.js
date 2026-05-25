@@ -26,9 +26,9 @@ import {
   STATUS_LABEL,
 } from "@/lib/event-store";
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
-import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers, hasAnyDemoUser } from "@/lib/auth";
+import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.2-auth-2026-05-25";
+const BUILD_STAMP = "v2.3-allowlist-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -384,38 +384,18 @@ function ParticipantCheckOut({ event, form, setForm, result, busy, onSubmit }) {
   );
 }
 
-function LoginScreen({ storeMode, onSignedIn }) {
-  const [mode, setMode] = useState("signin"); // signin | bootstrap
+function LoginScreen({ storeMode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [bootstrapAllowed, setBootstrapAllowed] = useState(false);
-
-  useEffect(() => {
-    // Detect whether a bootstrap path should be offered:
-    //   Demo mode: only if no demo users have been created yet.
-    //   Firebase mode: always offer — Firestore rules + Console invite are the real gate.
-    if (storeMode === "firebase") {
-      setBootstrapAllowed(true);
-    } else {
-      setBootstrapAllowed(!hasAnyDemoUser());
-    }
-  }, [storeMode]);
 
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
     setErr("");
     try {
-      if (mode === "signin") {
-        await signIn(email, password);
-        onSignedIn?.();
-      } else {
-        await createAdminUser({ email, password, createdBy: "bootstrap" });
-        await signIn(email, password);
-        onSignedIn?.();
-      }
+      await signIn(email, password);
     } catch (e2) {
       setErr(e2?.message || String(e2));
     } finally {
@@ -434,25 +414,6 @@ function LoginScreen({ storeMode, onSignedIn }) {
           </div>
         </div>
 
-        <div className="scb-login-tabs">
-          <button
-            type="button"
-            className={`scb-login-tab ${mode === "signin" ? "scb-login-tab-active" : ""}`}
-            onClick={() => { setMode("signin"); setErr(""); }}
-          >
-            Sign in
-          </button>
-          {bootstrapAllowed && (
-            <button
-              type="button"
-              className={`scb-login-tab ${mode === "bootstrap" ? "scb-login-tab-active" : ""}`}
-              onClick={() => { setMode("bootstrap"); setErr(""); }}
-            >
-              First-time setup
-            </button>
-          )}
-        </div>
-
         <form onSubmit={submit} className="scb-login-form">
           <Label htmlFor="login-email">Work email</Label>
           <Input
@@ -468,12 +429,10 @@ function LoginScreen({ storeMode, onSignedIn }) {
           <Input
             id="login-password"
             type="password"
-            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={mode === "bootstrap" ? 8 : undefined}
-            placeholder={mode === "bootstrap" ? "Min 8 characters" : ""}
           />
 
           {err && (
@@ -484,13 +443,13 @@ function LoginScreen({ storeMode, onSignedIn }) {
           )}
 
           <Button type="submit" disabled={busy} className="w-full">
-            {busy ? "Working..." : mode === "signin" ? "Sign in" : "Create first admin"}
+            {busy ? "Signing in..." : "Sign in"}
           </Button>
         </form>
 
         <p className="scb-login-foot">
-          Access restricted to Communitree + SCB internal team.
-          {storeMode === "demo" && " Running in demo mode — credentials stored in this browser only."}
+          Access by invitation only. No self-signup. An existing admin must add your email from the Admin Users page.
+          {storeMode === "demo" && " Demo mode — credentials live in this browser only."}
         </p>
       </div>
     </div>
@@ -1466,7 +1425,7 @@ function App() {
     return <div className="scb-login-wrap"><div className="scb-login-card"><p>Loading...</p></div></div>;
   }
   if (!authUser) {
-    return <LoginScreen storeMode={storeMode} onSignedIn={() => {}} />;
+    return <LoginScreen storeMode={storeMode} />;
   }
 
   return (

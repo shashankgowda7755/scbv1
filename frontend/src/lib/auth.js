@@ -1,11 +1,13 @@
+import { deleteApp, initializeApp } from "firebase/app";
 import {
   createUserWithEmailAndPassword,
+  getAuth,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc } from "firebase/firestore";
-import { firebaseAuth, firestoreDb, isDemoMode } from "./firebase";
+import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc } from "firebase/firestore";
+import { firebaseAuth, firebaseConfig, firestoreDb, isDemoMode } from "./firebase";
 
 const DEMO_USERS_KEY = "scb-demo-users";
 const DEMO_SESSION_KEY = "scb-demo-session";
@@ -46,8 +48,23 @@ export function observeAuth(cb) {
     demoListeners.add(cb);
     return () => demoListeners.delete(cb);
   }
-  return onAuthStateChanged(firebaseAuth, (u) => {
-    cb(u ? { uid: u.uid, email: u.email } : null);
+  return onAuthStateChanged(firebaseAuth, async (u) => {
+    if (!u) { cb(null); return; }
+    // Re-verify allowlist on every auth event (e.g. page reload).
+    try {
+      const allowSnap = await getDoc(doc(firestoreDb, "users", u.uid));
+      if (!allowSnap.exists()) {
+        await signOut(firebaseAuth);
+        cb(null);
+        return;
+      }
+    } catch {
+      // Network/rules glitch: fail closed.
+      await signOut(firebaseAuth).catch(() => {});
+      cb(null);
+      return;
+    }
+    cb({ uid: u.uid, email: u.email });
   });
 }
 
@@ -62,6 +79,12 @@ export async function signIn(email, password) {
     return session;
   }
   const cred = await signInWithEmailAndPassword(firebaseAuth, email.trim(), password);
+  // Allowlist gate: account must have a matching /users/{uid} doc.
+  const allowSnap = await getDoc(doc(firestoreDb, "users", cred.user.uid));
+  if (!allowSnap.exists()) {
+    await signOut(firebaseAuth);
+    throw new Error("This account is not authorized. Ask an existing admin to add you.");
+  }
   return { uid: cred.user.uid, email: cred.user.email };
 }
 
@@ -96,15 +119,25 @@ export async function createAdminUser({ email, password, createdBy }) {
     return { uid: newUser.uid, email: newUser.email, createdAt: newUser.createdAt, createdBy: newUser.createdBy };
   }
 
-  const cred = await createUserWithEmailAndPassword(firebaseAuth, cleanEmail, password);
-  // Mirror to /users for listing (client SDK can't list auth users).
-  await setDoc(doc(firestoreDb, "users", cred.user.uid), {
-    uid: cred.user.uid,
+  // Use a secondary Firebase app so the current admin's session stays signed in.
+  const secondaryApp = initializeApp(firebaseConfig, `scb-admin-create-${Date.now()}`);
+  const secondaryAuth = getAuth(secondaryApp);
+  let uid;
+  try {
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, cleanEmail, password);
+    uid = cred.user.uid;
+    await signOut(secondaryAuth).catch(() => {});
+  } finally {
+    await deleteApp(secondaryApp).catch(() => {});
+  }
+  // Mirror to /users — also acts as the allowlist gate for signIn.
+  await setDoc(doc(firestoreDb, "users", uid), {
+    uid,
     email: cleanEmail,
     createdAt: serverTimestamp(),
     createdBy: createdBy || "",
   });
-  return { uid: cred.user.uid, email: cleanEmail };
+  return { uid, email: cleanEmail };
 }
 
 export async function listAdminUsers() {
