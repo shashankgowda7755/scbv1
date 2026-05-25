@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>SCB Event Registration — Deck</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css" id="theme" />
+  <style>
+    :root {
+      --scb-green: #00715F;
+      --scb-blue: #0473EA;
+      --scb-ink: #0F172A;
+      --scb-paper: #FFFFFF;
+      --scb-muted: #475569;
+      --scb-soft: #F1F5F9;
+    }
+    .reveal {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif;
+      color: var(--scb-ink);
+    }
+    .reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+      font-family: inherit;
+      letter-spacing: -0.01em;
+      color: var(--scb-ink);
+      text-transform: none;
+    }
+    .reveal h1 { font-size: 2.4rem; line-height: 1.15; }
+    .reveal h2 { font-size: 1.8rem; }
+    .reveal h3 { font-size: 1.3rem; }
+    .reveal p, .reveal li { font-size: 1.15rem; line-height: 1.55; color: var(--scb-ink); }
+    .reveal small { color: var(--scb-muted); }
+    .reveal section { text-align: left; }
+    .reveal section.title-slide { text-align: center; }
+    .reveal section.title-slide h1 { font-size: 3rem; margin-bottom: 1rem; }
+
+    .pill {
+      display: inline-block;
+      padding: 0.3rem 0.85rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      background: var(--scb-soft);
+      color: var(--scb-ink);
+      border: 1px solid #CBD5E1;
+      margin: 0.15rem 0.25rem 0.15rem 0;
+    }
+    .pill.accent { background: rgba(0, 113, 95, 0.1); color: var(--scb-green); border-color: rgba(0, 113, 95, 0.3); }
+    .pill.warn { background: rgba(244, 114, 22, 0.1); color: #c2410c; border-color: rgba(244, 114, 22, 0.3); }
+
+    .reveal pre, .reveal code {
+      font-family: "SF Mono", "JetBrains Mono", Menlo, Monaco, monospace;
+      background: var(--scb-ink);
+      color: #E2E8F0;
+      border-radius: 8px;
+    }
+    .reveal pre { padding: 1rem 1.2rem; font-size: 0.9rem; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+    .reveal pre code { background: transparent; padding: 0; color: inherit; }
+    .reveal :not(pre) > code { padding: 0.1rem 0.4rem; font-size: 0.95em; }
+
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+    .card {
+      padding: 1rem 1.2rem;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      background: white;
+      box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+    }
+    .card h3 { margin-top: 0; font-size: 1rem; color: var(--scb-green); }
+    .card p { font-size: 0.95rem; margin: 0.25rem 0 0; }
+
+    .step-row {
+      display: grid;
+      grid-template-columns: 36px 1fr;
+      gap: 0.85rem;
+      align-items: flex-start;
+      margin-bottom: 0.85rem;
+    }
+    .step-num {
+      width: 32px; height: 32px;
+      border-radius: 999px;
+      background: var(--scb-green);
+      color: white;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 600; font-size: 0.95rem;
+    }
+    .step-body p { margin: 0; font-size: 1.05rem; }
+    .step-body strong { color: var(--scb-ink); }
+
+    .footnote { color: var(--scb-muted); font-size: 0.85rem; margin-top: 0.5rem; }
+
+    .reveal .progress { color: var(--scb-green); }
+    .reveal .controls { color: var(--scb-green); }
+  </style>
+</head>
+<body>
+<div class="reveal">
+<div class="slides">
+
+<!-- 01 Title -->
+<section class="title-slide">
+  <h1>SCB Event Registration</h1>
+  <h3 style="color: var(--scb-muted); font-weight: 400;">Google-backed. Encrypted at the field level. Built for the CSR Quiz Calendar Creation event.</h3>
+  <div style="margin-top: 2.5rem;">
+    <span class="pill accent">Cloud Firestore · Mumbai region</span>
+    <span class="pill accent">AES-256-GCM encryption</span>
+    <span class="pill">QR-driven registration</span>
+  </div>
+  <p style="margin-top: 2.5rem;"><small>Communitree × Standard Chartered · 12 PM IST</small></p>
+</section>
+
+<!-- 02 The brief -->
+<section>
+  <h2>The brief, from the call</h2>
+  <ul>
+    <li>SCB has a compliance ceiling — personal data must stay inside the Google ecosystem.</li>
+    <li>The Google Form + Sheet workflow is approved, but it has three gaps:
+      <ul>
+        <li>No duplicate prevention.</li>
+        <li>No live ops dashboard during the event.</li>
+        <li>No automated retention purge.</li>
+      </ul>
+    </li>
+    <li>Ask: close the three gaps without leaving the Google data path.</li>
+  </ul>
+  <p class="footnote">Quoted concern from Roshney on the meeting recording: "Getting their mobile number is an offence for me. Getting their email ID is an offence for me. Getting their employee ID is an offence."</p>
+</section>
+
+<!-- 03 What we built -->
+<section>
+  <h2>What we built</h2>
+  <div class="grid-3">
+    <div class="card"><h3>1. Operator console</h3><p>Create events, see live registrations, reveal/mask sensitive data, export CSV, purge.</p></div>
+    <div class="card"><h3>2. Participant view</h3><p>One URL per event. QR opens a clean, SCB-branded registration form on the participant's phone.</p></div>
+    <div class="card"><h3>3. Encrypted storage</h3><p>Cloud Firestore in Mumbai. Personal fields are ciphertext only. Operator holds the key.</p></div>
+  </div>
+  <p style="margin-top: 1.2rem;">Demo event: <strong>CSR Activity Chennai — Quiz Calendar Creation</strong>, 09 May 2026, DLF Downtown.</p>
+</section>
+
+<!-- 04 Data flow -->
+<section>
+  <h2>Data flow</h2>
+  <div class="step-row"><div class="step-num">1</div><div class="step-body"><p>Operator creates the event in the dashboard. App generates an event-specific URL + QR code.</p></div></div>
+  <div class="step-row"><div class="step-num">2</div><div class="step-body"><p>Employee scans the QR on their phone, lands on the participant form.</p></div></div>
+  <div class="step-row"><div class="step-num">3</div><div class="step-body"><p>Browser encrypts <code>fullName</code>, <code>employeeId</code>, <code>email</code>, <code>phone</code> with AES-256-GCM. Bank ID is SHA-256 hashed for the document ID.</p></div></div>
+  <div class="step-row"><div class="step-num">4</div><div class="step-body"><p>Ciphertext is written to Cloud Firestore. Dashboard updates live via <code>onSnapshot</code>.</p></div></div>
+  <div class="step-row"><div class="step-num">5</div><div class="step-body"><p>CSV export decrypts in-browser. Retention TTL or manual purge removes data after the event.</p></div></div>
+</section>
+
+<!-- 05 Inside Firestore -->
+<section>
+  <h2>What a row looks like in Firestore</h2>
+  <pre><code>// /registrations/scb-event-registration__a3f2c91b7e8d2105...
+
+{
+  eventId:       "scb-event-registration",
+  dedupeHash:    "a3f2c91b7e8d2105...",
+  fullName:      "enc:v1:&lt;iv&gt;.&lt;ciphertext&gt;",
+  employeeId:    "enc:v1:&lt;iv&gt;.&lt;ciphertext&gt;",
+  email:         "enc:v1:&lt;iv&gt;.&lt;ciphertext&gt;",
+  phone:         "enc:v1:&lt;iv&gt;.&lt;ciphertext&gt;",
+  participation: "Yes",
+  photoConsent:  true,
+  maskedFullName:    "R. M.",
+  maskedEmployeeId:  "SC**42",
+  createdAt:     2026-05-25T19:00:00Z,
+  expiresAt:     2026-08-07T00:00:00Z
+}</code></pre>
+  <p class="footnote">A database breach hands an attacker ciphertext and IVs. The key never travels with the data.</p>
+</section>
+
+<!-- 06 The encryption choice -->
+<section>
+  <h2>Field-level encryption — the headline</h2>
+  <div class="grid-2">
+    <div>
+      <h3>Algorithm</h3>
+      <p>AES-GCM, 256-bit key, 96-bit IV per record. Authenticated — tampering is detectable. Implemented with the browser's native Web Crypto API. No third-party crypto library.</p>
+    </div>
+    <div>
+      <h3>Key custody</h3>
+      <p>The key is held by the operator. Sourced in this order: <code>REACT_APP_DATA_KEY</code> env var, then localStorage. Never written to Firestore.</p>
+    </div>
+    <div>
+      <h3>Fingerprint</h3>
+      <p>The dashboard shows <code>kid-&lt;6 hex&gt;</code> derived from SHA-256 of the key. Safe to share — identifies the key without revealing it.</p>
+    </div>
+    <div>
+      <h3>Rotation demo</h3>
+      <p>One click generates a new key. Prior records become unreadable. Proves the database is meaningless without the key.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 07 Duplicate without decrypt -->
+<section>
+  <h2>Duplicate prevention without decryption</h2>
+  <p>The duplicate-check value (Bank ID) is hashed with a per-event salt and used as the Firestore document ID.</p>
+  <pre><code>docId = `${eventId}__${sha256(`${eventId}::${normalize(bankId)}`).slice(0, 24)}`</code></pre>
+  <ul>
+    <li>Two submissions with the same Bank ID collide on document ID.</li>
+    <li>Firestore reports "already exists" — we show the Replace dialog.</li>
+    <li>The server never sees the plaintext Bank ID.</li>
+    <li>Different events with the same Bank ID don't collide — the hash is salted with the event ID.</li>
+  </ul>
+</section>
+
+<!-- 08 Retention -->
+<section>
+  <h2>Retention and deletion</h2>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Manual purge</h3>
+      <p>Operator clicks <strong>Purge Event</strong> in the dashboard. The event document and every registration with that <code>eventId</code> are deleted immediately.</p>
+    </div>
+    <div class="card">
+      <h3>Automatic TTL</h3>
+      <p>Every document carries an <code>expiresAt</code> Timestamp. Firestore TTL policy on that field deletes documents within 24 hours of expiry.</p>
+    </div>
+  </div>
+  <p style="margin-top: 1.2rem;">SCB does not have to trust us to remember to delete the data. Firestore deletes it.</p>
+</section>
+
+<!-- 09 Tech stack -->
+<section>
+  <h2>Tech stack</h2>
+  <div class="grid-2">
+    <div>
+      <h3>In the browser</h3>
+      <ul>
+        <li>React 19, TailwindCSS, shadcn/ui</li>
+        <li>QR code via the <code>qrcode</code> npm package</li>
+        <li>Web Crypto API for AES-GCM</li>
+        <li>Firestore SDK for live updates</li>
+      </ul>
+    </div>
+    <div>
+      <h3>In Google Cloud</h3>
+      <ul>
+        <li>Cloud Firestore, <code>asia-south1</code> (Mumbai)</li>
+        <li>Firestore TTL on <code>expiresAt</code></li>
+        <li>Security rules shape-validate writes</li>
+        <li>Firebase Auth ready (V2)</li>
+      </ul>
+    </div>
+  </div>
+  <p style="margin-top: 1rem;"><span class="pill accent">No third-party SaaS in the data path</span> <span class="pill">Static hosting on Vercel</span></p>
+</section>
+
+<!-- 10 Security rules -->
+<section>
+  <h2>Firestore security rules (v1)</h2>
+  <pre><code>match /registrations/{id} {
+  allow read: if true;
+  allow create, update: if
+    request.resource.data.eventId is string
+    &amp;&amp; exists(/databases/$(database)/documents/events/$(request.resource.data.eventId))
+    &amp;&amp; hasEncryptedShape(request.resource.data.fullName)
+    &amp;&amp; hasEncryptedShape(request.resource.data.employeeId)
+    &amp;&amp; hasEncryptedShape(request.resource.data.email)
+    &amp;&amp; hasEncryptedShape(request.resource.data.phone)
+    &amp;&amp; request.resource.data.participation in ['Yes', 'No']
+    &amp;&amp; request.resource.data.photoConsent is bool
+    &amp;&amp; request.resource.data.dedupeHash is string;
+}</code></pre>
+  <p class="footnote">Plaintext can't enter the database even from a hostile client. The rule rejects any field that doesn't carry the <code>enc:v1:</code> shape.</p>
+</section>
+
+<!-- 11 Challenges -->
+<section>
+  <h2>Technical challenges we solved</h2>
+  <div class="step-row"><div class="step-num">1</div><div class="step-body"><p><strong>"We can't use a non-Google database."</strong> Picked Cloud Firestore — same Google account, same vendor surface as a Google Sheet.</p></div></div>
+  <div class="step-row"><div class="step-num">2</div><div class="step-body"><p><strong>"We can't hold personal data even by accident."</strong> Field-level AES-256-GCM. Ciphertext only in Firestore. Operator holds the key.</p></div></div>
+  <div class="step-row"><div class="step-num">3</div><div class="step-body"><p><strong>Duplicate detection without reading PII.</strong> SHA-256 hash with a per-event salt as the document ID.</p></div></div>
+  <div class="step-row"><div class="step-num">4</div><div class="step-body"><p><strong>Live count without polling.</strong> Firestore <code>onSnapshot</code> — sub-second update.</p></div></div>
+  <div class="step-row"><div class="step-num">5</div><div class="step-body"><p><strong>Retention SCB doesn't have to babysit.</strong> Firestore TTL policy on <code>expiresAt</code>.</p></div></div>
+</section>
+
+<!-- 12 What's not yet in V1 -->
+<section>
+  <h2>One merge away from V2</h2>
+  <ul>
+    <li><strong>Operator Firebase Auth.</strong> Google sign-in + custom claims. Lock dashboard reads/writes to staff only.</li>
+    <li><strong>Audit log.</strong> A <code>/audit</code> collection that records every reveal, export, and purge with the operator's UID and timestamp.</li>
+    <li><strong>Google Sheet mirror.</strong> A Cloud Function trigger on registration create pushes a decrypted row into an SCB-approved Sheet — keeps the existing handoff format alive.</li>
+    <li><strong>SSO with the bank.</strong> Firebase Auth supports SAML/OIDC. Operators log in with their bank credentials.</li>
+  </ul>
+</section>
+
+<!-- 13 What we'll show in the demo -->
+<section>
+  <h2>The 12-minute demo, by the clock</h2>
+  <ol>
+    <li>Walk the Security Flow talk track. <em>90 sec</em></li>
+    <li>Create the Quiz Calendar event. <em>60 sec</em></li>
+    <li>Scan QR on a phone. <em>30 sec</em></li>
+    <li>Submit a registration. Count ticks up live. <em>60 sec</em></li>
+    <li>Open Firestore console. Show ciphertext, masked previews, doc ID. <em>90 sec</em></li>
+    <li>Reveal (Decrypt). Show plaintext. <em>45 sec</em></li>
+    <li>Submit the same Bank ID. Show duplicate dialog. <em>45 sec</em></li>
+    <li>Rotate Key. Show old records become <code>[decrypt failed]</code>. <em>60 sec</em></li>
+    <li>Export CSV. Show the handoff format. <em>30 sec</em></li>
+    <li>Purge Event. Dashboard goes to zero. <em>30 sec</em></li>
+  </ol>
+</section>
+
+<!-- 14 Q&A / Close -->
+<section class="title-slide">
+  <h1>Questions?</h1>
+  <p style="margin-top: 1rem;">Open the participant view on your phone and try a registration.</p>
+  <p style="margin-top: 2rem;"><small>Shashank Gowda · shashank@tndwwt.org · Communitree</small></p>
+</section>
+
+</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
+<script>
+  Reveal.initialize({
+    hash: true,
+    slideNumber: 'c/t',
+    transition: 'fade',
+    width: 1280,
+    height: 760,
+    margin: 0.06,
+  });
+</script>
+</body>
+</html>

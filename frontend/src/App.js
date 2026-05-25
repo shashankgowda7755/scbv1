@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { AlertTriangle, Building2, CalendarDays, Database, Download, Eye, EyeOff, KeyRound, Link2, LockKeyhole, QrCode, RefreshCw, ShieldCheck, Trash2, Users } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { AlertTriangle, BarChart3, CalendarPlus, ClipboardList, Database, Download, Eye, EyeOff, FilePlus, FileText, KeyRound, Link2, LockKeyhole, LogOut, QrCode, RefreshCw, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 
 import "@/App.css";
 import { getStoreMode, subscribeEvents, subscribeRegistrations, createEvent, deleteEvent, saveRegistration, seedScbDemoEvent, decryptRegistrations, decryptRegistration } from "@/lib/event-store";
@@ -196,7 +195,7 @@ function App() {
   const [events, setEvents] = useState([]);
   const [registrations, setRegistrations] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState("");
-  const [activeTab, setActiveTab] = useState("register");
+  const [activeTab, setActiveTab] = useState("events");
   const [registrationForm, setRegistrationForm] = useState(registrationDefaults);
   const [eventForm, setEventForm] = useState(eventDefaults);
   const [message, setMessage] = useState({ type: "", text: "" });
@@ -239,7 +238,7 @@ function App() {
   useEffect(() => {
     if (!events.length) {
       setSelectedEventId("");
-      setActiveTab("dashboard");
+      setActiveTab("events");
       return;
     }
 
@@ -251,7 +250,7 @@ function App() {
     setSelectedEventId(nextSelected);
 
     if (window.location.hash.replace("#", "") === "register") {
-      setActiveTab("register");
+      setActiveTab("registrations");
     }
   }, [events, selectedEventId]);
 
@@ -323,10 +322,6 @@ function App() {
     [eventRegistrations, decryptedById],
   );
   const totalRegistrations = registrations.length;
-  const chartData = events.map((event) => ({
-    name: event.title,
-    count: registrations.filter((registration) => registration.eventId === event.id).length,
-  }));
   const shareUrl = selectedEvent ? getEventShareUrl(selectedEvent.id) : "";
 
   useEffect(() => {
@@ -341,7 +336,7 @@ function App() {
       width: 320,
       margin: 1,
       color: {
-        dark: "#0f766e",
+        dark: "#0A0A0A",
         light: "#ffffff",
       },
     })
@@ -408,7 +403,7 @@ function App() {
         location: "",
         notes: "",
       });
-      setActiveTab("dashboard");
+      setActiveTab("qrshare");
       setMessage({
         type: "success",
         text: `Event "${createdEvent.title}" is ready. You can now share the QR code or registration link.`,
@@ -588,7 +583,7 @@ function App() {
     seedScbDemoEvent()
       .then((seededEvent) => {
         setSelectedEventId(seededEvent.id);
-        setActiveTab("dashboard");
+        setActiveTab("qrshare");
         setMessage({
           type: "success",
           text: "Standard Chartered demo event created. You can now walk the client through the full flow.",
@@ -602,130 +597,93 @@ function App() {
       });
   }
 
-  const flowSteps = [
-    {
-      title: "1. QR or private link",
-      description: "The client shares a single event-specific link or QR code only with the intended employees.",
-      icon: QrCode,
-    },
-    {
-      title: "2. Registration page",
-      description: "Employees land on the event page, enter their details, and the form validates before save.",
-      icon: Users,
-    },
-    {
-      title: "3. Google-backed storage",
-      description: "The data is written to Cloud Firestore in Firebase, inside the client's approved Google ecosystem.",
-      icon: Database,
-    },
-    {
-      title: "4. Dashboard and export",
-      description: "Operations can review live registrations, export the final CSV, then purge the event data post campaign.",
-      icon: ShieldCheck,
-    },
-  ];
-
   if (participantMode) {
     return (
-      <div className="scb-shell">
-        <div className="scb-orb scb-orb-left" />
-        <div className="scb-orb scb-orb-right" />
-        <div className="scb-grid" />
-
-        <main className="scb-container scb-participant">
-          <section className="hero-card">
-            <div className="hero-copy">
-              <Badge className="hero-badge" variant="secondary">
-                Standard Chartered
-              </Badge>
-              <h1 className="hero-title">
-                {selectedEvent ? selectedEvent.title : "Event Registration"}
-              </h1>
-              <p className="hero-description">
-                {selectedEvent
-                  ? `${selectedEvent.clientName} · ${selectedEvent.location || ""}`
-                  : "This link is configured for a specific Standard Chartered event."}
+      <div className="gform-page">
+        <main className="gform-shell">
+          <div className="gform-header">
+            <h1>{selectedEvent ? selectedEvent.title : "CSR Activity Chennai - Quiz Calendar Creation"}</h1>
+            <p className="gform-lead"><strong>Welcome to the Quiz Calendar Creation!</strong></p>
+            <p>Thank you for being part of this creative initiative!</p>
+            <p>We will be designing Quiz calendars to help students create their own calendar while learning about the important dates and events in each month.</p>
+            <p>Your creativity will make these important days come alive for young learners!</p>
+            <p>Please fill out the form below to mark your attendance.</p>
+            {selectedEvent && (
+              <p className="gform-meta">
+                <strong>Date:</strong> {formatDate(selectedEvent.eventDate)}<br />
+                <strong>Location:</strong> {selectedEvent.location}
               </p>
-              <div className="hero-pill-row">
-                <Badge variant="outline" className="hero-pill">
-                  <LockKeyhole className="h-3.5 w-3.5" />
-                  Encrypted before save
-                </Badge>
-                <Badge variant="outline" className="hero-pill">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  Stored in Google Firestore
-                </Badge>
-              </div>
-            </div>
-          </section>
+            )}
+            <p className="gform-required">* Indicates required question</p>
+          </div>
 
           {message.text && (
-            <Alert className={message.type === "error" ? "status-alert border-red-300 bg-red-50" : "status-alert border-emerald-300 bg-emerald-50"}>
-              <AlertTriangle className={`h-5 w-5 ${message.type === "error" ? "text-red-600" : "text-emerald-600"}`} />
-              <AlertDescription className={message.type === "error" ? "text-red-900" : "text-emerald-900"}>
-                {message.text}
-              </AlertDescription>
-            </Alert>
+            <div className={`gform-alert ${message.type === "error" ? "gform-alert-error" : "gform-alert-success"}`}>
+              {message.text}
+            </div>
           )}
 
-          <Card className="glass-card">
-            <CardHeader>
-              <CardTitle>Welcome to the Quiz Calendar Creation</CardTitle>
-              <CardDescription>
-                Thank you for being part of this creative initiative. We will be designing Quiz Calendars to help students
-                create their own calendar while learning about the important dates and events in each month. Please fill out
-                the form below to mark your attendance.
-                {selectedEvent && (
-                  <>
-                    <br />
-                    <strong>Date:</strong> {formatDate(selectedEvent.eventDate)} · <strong>Location:</strong> {selectedEvent.location}
-                  </>
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form className="space-y-5" onSubmit={handleRegistrationSubmit}>
-                <div className="space-y-2">
-                  <Label htmlFor="p-fullName">Full Name *</Label>
-                  <Input id="p-fullName" value={registrationForm.fullName} onChange={(e) => updateRegistrationField("fullName", e.target.value)} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="p-employeeId">Bank ID *</Label>
-                  <Input id="p-employeeId" value={registrationForm.employeeId} onChange={(e) => updateRegistrationField("employeeId", e.target.value)} placeholder="SCB-EMP-1042" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Participation *</Label>
-                  <div className="radio-row">
-                    {participationOptions.map((option) => (
-                      <label key={option} className="radio-option">
-                        <input
-                          type="radio"
-                          name="participation"
-                          value={option}
-                          checked={registrationForm.participation === option}
-                          onChange={() => updateRegistrationField("participation", option)}
-                        />
-                        <span>{option}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <label className="consent-row">
-                  <input
-                    type="checkbox"
-                    checked={registrationForm.photoConsent}
-                    onChange={(e) => updateRegistrationField("photoConsent", e.target.checked)}
-                  />
-                  <span>
-                    By registering for this event, you consent to processing and usage of your photos and videos for event management and internal communication purposes.
-                  </span>
-                </label>
-                <Button type="submit" className="cta-button" disabled={submitting || !selectedEvent}>
-                  {submitting ? "Submitting..." : "Submit Registration"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+          <form className="gform-form" onSubmit={handleRegistrationSubmit}>
+            <div className="gform-q">
+              <label htmlFor="p-fullName">Full Name <span className="gform-star">*</span></label>
+              <input
+                id="p-fullName"
+                className="gform-input"
+                placeholder="Your answer"
+                value={registrationForm.fullName}
+                onChange={(e) => updateRegistrationField("fullName", e.target.value)}
+              />
+            </div>
+
+            <div className="gform-q">
+              <label htmlFor="p-employeeId">Bank ID <span className="gform-star">*</span></label>
+              <input
+                id="p-employeeId"
+                className="gform-input"
+                placeholder="Your answer"
+                value={registrationForm.employeeId}
+                onChange={(e) => updateRegistrationField("employeeId", e.target.value)}
+              />
+            </div>
+
+            <div className="gform-q">
+              <label>Participation <span className="gform-star">*</span></label>
+              <div className="gform-radio-group">
+                {participationOptions.map((option) => (
+                  <label key={option} className="gform-radio">
+                    <input
+                      type="radio"
+                      name="participation"
+                      value={option}
+                      checked={registrationForm.participation === option}
+                      onChange={() => updateRegistrationField("participation", option)}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="gform-q">
+              <p className="gform-quote">"By registering for this event, you consent to processing and usage of your photos and videos for event management and internal communication purposes."</p>
+              <label className="gform-radio">
+                <input
+                  type="checkbox"
+                  checked={registrationForm.photoConsent}
+                  onChange={(e) => updateRegistrationField("photoConsent", e.target.checked)}
+                />
+                <span>Yes</span>
+              </label>
+            </div>
+
+            <button type="submit" className="gform-submit" disabled={submitting || !selectedEvent}>
+              {submitting ? "Submitting..." : "Submit"}
+            </button>
+          </form>
+
+          <div className="gform-footer">
+            Never submit passwords through this form.
+          </div>
         </main>
 
         {duplicateState.open && (
@@ -749,110 +707,119 @@ function App() {
     );
   }
 
+  const navSections = [
+    {
+      heading: "Setup",
+      items: [
+        { id: "events", label: "Events", icon: CalendarPlus, ready: true },
+        { id: "formbuilder", label: "Form Builder", icon: FilePlus, ready: false },
+      ],
+    },
+    {
+      heading: "Operate",
+      items: [
+        { id: "registrations", label: "Registrations", icon: UserPlus, ready: true },
+        { id: "checkin", label: "Check-In", icon: ClipboardList, ready: false },
+        { id: "checkout", label: "Checkout", icon: LogOut, ready: false },
+        { id: "qrshare", label: "QR & Share", icon: QrCode, ready: true },
+      ],
+    },
+    {
+      heading: "Insights",
+      items: [
+        { id: "dashboard", label: "Dashboard", icon: BarChart3, ready: true },
+        { id: "reports", label: "Reports", icon: FileText, ready: false },
+      ],
+    },
+    {
+      heading: "Trust",
+      items: [
+        { id: "security", label: "Security", icon: ShieldCheck, ready: true },
+      ],
+    },
+  ];
+
+  const activeLabel = navSections
+    .flatMap((section) => section.items)
+    .find((item) => item.id === activeTab)?.label || "Events";
+
   return (
     <div className="scb-shell">
-      <div className="scb-orb scb-orb-left" />
-      <div className="scb-orb scb-orb-right" />
-      <div className="scb-grid" />
-
-      <main className="scb-container">
-        <section className="hero-card">
-          <div className="hero-copy">
-            <Badge className="hero-badge" variant="secondary">
-              Standard Chartered Demo Stack
-            </Badge>
-            <h1 className="hero-title">Firebase-based event registration, dashboard visibility, and client-safe data flow.</h1>
-            <p className="hero-description">
-              This demo is now aligned to the meeting: a Google-backed storage model, event-wise QR registration,
-              duplicate control, a live dashboard, export handoff, and a clear post-event purge path.
-            </p>
-            <div className="hero-pill-row">
-              <Badge variant="outline" className="hero-pill">
-                <Database className="h-3.5 w-3.5" />
-                {storeMode === "firebase" ? "Connected to Firestore" : "Demo mode, Firebase-ready"}
-              </Badge>
-              <Badge variant="outline" className="hero-pill">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Dashboard masks sensitive fields by default
-              </Badge>
-              <Badge variant="outline" className="hero-pill">
-                <LockKeyhole className="h-3.5 w-3.5" />
-                Field-level AES-256-GCM encryption
-              </Badge>
-              <Badge variant="outline" className="hero-pill">
-                <CalendarDays className="h-3.5 w-3.5" />
-                Retention tracked per event
-              </Badge>
+      <div className="scb-layout">
+        <aside className="scb-sidebar">
+          <div className="scb-sidebar-brand">
+            <div className="scb-sidebar-logo">SCB</div>
+            <div>
+              <div className="scb-sidebar-name">Event Platform</div>
+              <div className="scb-sidebar-sub">Communitree</div>
             </div>
           </div>
 
-          <div className="hero-metrics">
-            <Card className="glass-card metric-card">
-              <CardHeader className="metric-header">
-                <CardDescription>Active Events</CardDescription>
-                <Building2 className="metric-icon" />
-              </CardHeader>
-              <CardContent>
-                <div className="metric-value">{events.length}</div>
-              </CardContent>
-            </Card>
+          <nav className="scb-nav">
+            {navSections.map((section) => (
+              <div key={section.heading} className="scb-nav-section">
+                <div className="scb-nav-heading">{section.heading}</div>
+                {section.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`scb-nav-item ${isActive ? "scb-nav-item-active" : ""}`}
+                      onClick={() => setActiveTab(item.id)}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                      {!item.ready && <span className="scb-nav-badge">Soon</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
 
-            <Card className="glass-card metric-card">
-              <CardHeader className="metric-header">
-                <CardDescription>Total Registrations</CardDescription>
-                <Users className="metric-icon" />
-              </CardHeader>
-              <CardContent>
-                <div className="metric-value">{totalRegistrations}</div>
-              </CardContent>
-            </Card>
-
-            <Card className="glass-card metric-card">
-              <CardHeader className="metric-header">
-                <CardDescription>Selected Event</CardDescription>
-                <CalendarDays className="metric-icon" />
-              </CardHeader>
-              <CardContent>
-                <div className="metric-value metric-value-small">
-                  {selectedEvent ? eventRegistrations.length : 0}
-                </div>
-                <p className="metric-subtitle">
-                  {selectedEvent ? `${selectedEvent.title}` : "Create an event to begin"}
-                </p>
-              </CardContent>
-            </Card>
+          <div className="scb-sidebar-foot">
+            <div className="scb-sidebar-keyline">
+              <span>Key</span>
+              <strong>{keyFingerprint || "loading..."}</strong>
+            </div>
+            <Badge variant="outline" className="scb-status-pill">
+              <Database className="h-3.5 w-3.5" />
+              {storeMode === "firebase" ? "Firestore live" : "Demo mode"}
+            </Badge>
           </div>
-        </section>
+        </aside>
 
-        {storeMode !== "firebase" && (
-          <Alert className="status-alert border-amber-300 bg-amber-50">
-            <AlertTriangle className="h-5 w-5 text-amber-600" />
-            <AlertDescription className="text-amber-900">
-              Firebase environment variables are not configured yet, so the demo is currently running in browser-backed
-              demo mode. The UI, flow, duplicate logic, dashboard, QR generation, and Firestore data model are ready to
-              switch over as soon as the Firebase keys are added.
-            </AlertDescription>
-          </Alert>
-        )}
+        <main className="scb-main">
+          <header className="scb-topbar">
+            <div className="scb-brand">
+              <div className="scb-crumb">SCB Event Platform / {activeLabel}</div>
+              <h1>{activeLabel}</h1>
+            </div>
+            <div className="scb-stats">
+              <div className="scb-stat"><span>Events</span><strong>{events.length}</strong></div>
+              <div className="scb-stat"><span>Registrations</span><strong>{totalRegistrations}</strong></div>
+              <div className="scb-stat"><span>This Event</span><strong>{selectedEvent ? eventRegistrations.length : 0}</strong></div>
+            </div>
+          </header>
 
-        {message.text && (
-          <Alert className={message.type === "error" ? "status-alert border-red-300 bg-red-50" : "status-alert border-emerald-300 bg-emerald-50"}>
-            <AlertTriangle className={`h-5 w-5 ${message.type === "error" ? "text-red-600" : "text-emerald-600"}`} />
-            <AlertDescription className={message.type === "error" ? "text-red-900" : "text-emerald-900"}>
-              {message.text}
-            </AlertDescription>
-          </Alert>
-        )}
+          {message.text && (
+            <Alert className={message.type === "error" ? "status-alert border-red-300 bg-red-50" : "status-alert border-emerald-300 bg-emerald-50"}>
+              <AlertTriangle className={`h-5 w-5 ${message.type === "error" ? "text-red-600" : "text-emerald-600"}`} />
+              <AlertDescription className={message.type === "error" ? "text-red-900" : "text-emerald-900"}>
+                {message.text}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="tab-strip">
-            <TabsTrigger value="register">Registration Desk</TabsTrigger>
-            <TabsTrigger value="dashboard">Event Dashboard</TabsTrigger>
-            <TabsTrigger value="security">Security Flow</TabsTrigger>
-          </TabsList>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+            <TabsList className="tab-strip" style={{ display: "none" }}>
+              <TabsTrigger value="events">Events</TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="register">
-            <div className="content-grid">
+          <TabsContent value="registrations">
+            <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
                   <CardTitle>Capture Registration</CardTitle>
@@ -990,24 +957,32 @@ function App() {
                   </form>
                 </CardContent>
               </Card>
+            </div>
+          </TabsContent>
 
-              <div className="stacked-column">
-                <Card className="glass-card">
-                  <CardHeader>
-                    <CardTitle>Event QR and Private Link</CardTitle>
-                    <CardDescription>
-                      Generate one QR per event so the client can distribute the registration page internally.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {selectedEvent ? (
-                      <>
-                        <div className="qr-panel">
-                          {qrCodeUrl ? (
-                            <img className="qr-image" src={qrCodeUrl} alt={`${selectedEvent.title} QR code`} />
-                          ) : (
-                            <div className="qr-placeholder">QR preview unavailable</div>
-                          )}
+          <TabsContent value="qrshare">
+            <div className="page-stack">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Event QR and Private Link</CardTitle>
+                  <CardDescription>
+                    Generate one QR per event so the client can distribute the registration page internally.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {selectedEvent ? (
+                    <div className="qr-layout">
+                      <div className="qr-panel">
+                        {qrCodeUrl ? (
+                          <img className="qr-image" src={qrCodeUrl} alt={`${selectedEvent.title} QR code`} />
+                        ) : (
+                          <div className="qr-placeholder">QR preview unavailable</div>
+                        )}
+                      </div>
+                      <div className="qr-meta">
+                        <div className="summary-item">
+                          <span>Event</span>
+                          <strong>{selectedEvent.title}</strong>
                         </div>
                         <div className="space-y-2">
                           <Label>Share Link</Label>
@@ -1023,45 +998,92 @@ function App() {
                             Open participant view in a new tab →
                           </a>
                         </div>
-                      </>
-                    ) : (
-                      <div className="empty-state">
-                        Create an event from the dashboard to generate the QR link.
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                <Card className="glass-card">
-                  <CardHeader>
-                    <CardTitle>What the Client Sees</CardTitle>
-                    <CardDescription>
-                      A plain-language walkthrough of how the data moves once the QR is scanned.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {flowSteps.map((step) => {
-                      const Icon = step.icon;
-                      return (
-                        <div key={step.title} className="flow-step">
-                          <div className="flow-icon">
-                            <Icon className="h-4 w-4" />
-                          </div>
-                          <div>
-                            <p className="flow-title">{step.title}</p>
-                            <p className="flow-description">{step.description}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </CardContent>
-                </Card>
-              </div>
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      Create an event from the Events page to generate the QR link.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
 
-          <TabsContent value="dashboard">
-            <div className="content-grid">
+          <TabsContent value="formbuilder">
+            <div className="page-stack">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Form Builder</CardTitle>
+                  <CardDescription>
+                    No-code editor to create the Registration, Check-In, and Checkout forms per event. Coming next.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flow-step"><div className="flow-icon"><FilePlus className="h-4 w-4" /></div><div><p className="flow-title">Pick the event</p><p className="flow-description">Forms are scoped to one Event Code so they auto-close when the event closes.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><FilePlus className="h-4 w-4" /></div><div><p className="flow-title">Drag-and-drop fields</p><p className="flow-description">Text, dropdown, radio, checkbox, date, file upload. Mark required and one Unique ID field.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><FilePlus className="h-4 w-4" /></div><div><p className="flow-title">Preview + publish</p><p className="flow-description">Generate three shareable URLs: registration, check-in, checkout. Admin never touches code.</p></div></div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="checkin">
+            <div className="page-stack">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Check-In</CardTitle>
+                  <CardDescription>
+                    Single-field form for the venue desk. Type or scan the Unique ID, system marks the attendee Checked In. Coming next.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flow-step"><div className="flow-icon"><ClipboardList className="h-4 w-4" /></div><div><p className="flow-title">Match on Event Code + Unique ID</p><p className="flow-description">Found → green confirmation with name and timestamp. Not found → walk-in path.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><ClipboardList className="h-4 w-4" /></div><div><p className="flow-title">Duplicate guard</p><p className="flow-description">Second check-in on the same ID shows "Already checked in at HH:MM".</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><ClipboardList className="h-4 w-4" /></div><div><p className="flow-title">Walk-in capture</p><p className="flow-description">Unregistered attendees are captured with status Walk-In, Check-In Only.</p></div></div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="checkout">
+            <div className="page-stack">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Checkout</CardTitle>
+                  <CardDescription>
+                    End-of-event exit form. Closes the attendance loop and feeds the post-event report. Coming next.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flow-step"><div className="flow-icon"><LogOut className="h-4 w-4" /></div><div><p className="flow-title">Lookup against registration + check-in</p><p className="flow-description">Match found → record Checked Out timestamp. No check-in but registered → status Registered + Checked Out, No Check-In.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><LogOut className="h-4 w-4" /></div><div><p className="flow-title">Walk-in checkout</p><p className="flow-description">Attendees that only appear at exit are captured as Walk-In Checkout for the report.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><LogOut className="h-4 w-4" /></div><div><p className="flow-title">Status engine</p><p className="flow-description">After the event closes, every Unique ID gets a status: COMPLETE, REG_CHECKIN, REG_ONLY, REG_CHECKOUT, WALKIN_COMPLETE, WALKIN_CHECKIN, WALKIN_CHECKOUT, NO_SHOW.</p></div></div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="reports">
+            <div className="page-stack">
+              <Card className="glass-card">
+                <CardHeader>
+                  <CardTitle>Reports</CardTitle>
+                  <CardDescription>
+                    Post-event attendance report with status flags, exportable as CSV and PDF. Coming next.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flow-step"><div className="flow-icon"><FileText className="h-4 w-4" /></div><div><p className="flow-title">Summary block</p><p className="flow-description">Total Registrations, Check-Ins, Checkouts, Walk-Ins, No-Shows, Completion Rate.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><FileText className="h-4 w-4" /></div><div><p className="flow-title">Per-attendee detail</p><p className="flow-description">Name, Unique ID, Registration Time, Check-In Time, Checkout Time, Status. Filter by status, export CSV / PDF.</p></div></div>
+                  <div className="flow-step"><div className="flow-icon"><FileText className="h-4 w-4" /></div><div><p className="flow-title">Global trend</p><p className="flow-description">Last 6 events: attendance rate trend across the program.</p></div></div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="events">
+            <div className="page-stack">
               <Card className="glass-card">
                 <CardHeader>
                   <CardTitle>Create Event</CardTitle>
@@ -1167,8 +1189,11 @@ function App() {
                   </form>
                 </CardContent>
               </Card>
+            </div>
+          </TabsContent>
 
-              <div className="stacked-column">
+          <TabsContent value="dashboard">
+            <div className="page-stack">
                 <Card className="glass-card">
                   <CardHeader>
                     <CardTitle>Live Dashboard</CardTitle>
@@ -1213,17 +1238,6 @@ function App() {
                           </Button>
                         </div>
 
-                        <div className="chart-shell">
-                          <ResponsiveContainer width="100%" height={220}>
-                            <BarChart data={chartData}>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                              <XAxis dataKey="name" tickLine={false} axisLine={false} hide />
-                              <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-                              <Tooltip />
-                              <Bar dataKey="count" fill="#0f766e" radius={[8, 8, 0, 0]} />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
                       </>
                     ) : (
                       <div className="empty-state">
@@ -1279,7 +1293,6 @@ function App() {
                     </Table>
                   </CardContent>
                 </Card>
-              </div>
             </div>
           </TabsContent>
 
@@ -1399,32 +1412,6 @@ function App() {
                 </CardContent>
               </Card>
 
-              <Card className="glass-card">
-                <CardHeader>
-                  <CardTitle>Meeting Translation</CardTitle>
-                  <CardDescription>
-                    What the transcript changed in the product direction.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4 text-sm text-slate-700">
-                  <div className="summary-item">
-                    <span>What they rejected</span>
-                    <strong>Custom storage that feels outside Google or looks hard to audit.</strong>
-                  </div>
-                  <div className="summary-item">
-                    <span>What they asked to see</span>
-                    <strong>A full module: QR entry, data landing point, dashboard, and the final send-to-client format.</strong>
-                  </div>
-                  <div className="summary-item">
-                    <span>What this version demonstrates</span>
-                    <strong>Event creation, QR generation, duplicate-safe registration, live dashboard, CSV export, and post-event purge.</strong>
-                  </div>
-                  <div className="summary-item">
-                    <span>What still depends on Firebase credentials</span>
-                    <strong>Real Firestore writes in production mode and the final project-specific security rules.</strong>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           </TabsContent>
         </Tabs>
@@ -1489,7 +1476,8 @@ function App() {
             </div>
           </div>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
