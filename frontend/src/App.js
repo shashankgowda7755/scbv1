@@ -29,7 +29,7 @@ import {
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
 
-const BUILD_STAMP = "v2.8-current-btn-2026-05-25";
+const BUILD_STAMP = "v2.9-activate-toggle-2026-05-25";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -138,6 +138,10 @@ function getCheckOutUrl(eventId) {
 }
 
 const PARTICIPANT_MODES = new Set(["register", "checkin", "checkout"]);
+
+function eventStatusLabel(status) {
+  return status === "closed" ? "INACTIVE" : "ACTIVE";
+}
 
 function getParticipantMode() {
   if (typeof window === "undefined") return null;
@@ -1147,27 +1151,29 @@ function App() {
     }
   }
 
-  async function handleCloseEvent() {
-    if (!selectedEvent) return;
+  async function handleCloseEvent(eventArg) {
+    const ev = eventArg || selectedEvent;
+    if (!ev) return;
     const proceed = window.confirm(
-      `Close "${selectedEvent.title}"? This computes the final attendance report and stops accepting new registrations / check-ins.`,
+      `Deactivate "${ev.title}"? This stops accepting new registrations / check-ins and finalizes the attendance report.`,
     );
     if (!proceed) return;
     try {
-      await closeEvent(selectedEvent.id);
-      setMessage({ type: "success", text: "Event closed. Attendance report finalized." });
+      await closeEvent(ev.id);
+      setMessage({ type: "success", text: `"${ev.title}" deactivated. Attendance report finalized.` });
     } catch (error) {
-      setMessage({ type: "error", text: "Close failed." });
+      setMessage({ type: "error", text: "Deactivate failed." });
     }
   }
 
-  async function handleReopenEvent() {
-    if (!selectedEvent) return;
+  async function handleReopenEvent(eventArg) {
+    const ev = eventArg || selectedEvent;
+    if (!ev) return;
     try {
-      await reopenEvent(selectedEvent.id);
-      setMessage({ type: "success", text: "Event reopened. Accepting registrations and check-ins again." });
+      await reopenEvent(ev.id);
+      setMessage({ type: "success", text: `"${ev.title}" activated. Accepting registrations and check-ins again.` });
     } catch (error) {
-      setMessage({ type: "error", text: "Reopen failed." });
+      setMessage({ type: "error", text: "Activate failed." });
     }
   }
 
@@ -1558,7 +1564,7 @@ function App() {
                   <SelectContent>
                     {events.map((ev) => (
                       <SelectItem key={ev.id} value={ev.id}>
-                        {ev.title}{ev.status === "closed" ? " (closed)" : ""}
+                        {ev.title}{ev.status === "closed" ? " (inactive)" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1798,7 +1804,7 @@ function App() {
                             <span>{ev.location}</span>
                           </div>
                           <div className="event-tile-status">
-                            {(ev.status || "active").toUpperCase()}
+                            {eventStatusLabel(ev.status)}
                           </div>
                         </button>
                       ))}
@@ -1916,7 +1922,7 @@ function App() {
                     <>
                       <div className="summary-grid">
                         <div className="summary-item"><span>Event</span><strong>{selectedEvent.title}</strong></div>
-                        <div className="summary-item"><span>Status</span><strong>{(selectedEvent.status || "active").toUpperCase()}</strong></div>
+                        <div className="summary-item"><span>Status</span><strong>{eventStatusLabel(selectedEvent.status)}</strong></div>
                         <div className="summary-item"><span>Registered</span><strong>{eventRegistrations.length}</strong></div>
                         <div className="summary-item"><span>Checked In</span><strong>{eventCheckIns.length}</strong></div>
                       </div>
@@ -2140,7 +2146,7 @@ function App() {
                     <>
                       <div className="summary-grid">
                         <div className="summary-item"><span>Event</span><strong>{selectedEvent.title}</strong></div>
-                        <div className="summary-item"><span>Status</span><strong>{(selectedEvent.status || "active").toUpperCase()}</strong></div>
+                        <div className="summary-item"><span>Status</span><strong>{eventStatusLabel(selectedEvent.status)}</strong></div>
                         <div className="summary-item"><span>Date</span><strong>{formatDate(selectedEvent.eventDate)}</strong></div>
                         <div className="summary-item"><span>Completion Rate</span><strong>{completionRate}%</strong></div>
                       </div>
@@ -2199,14 +2205,14 @@ function App() {
                           Export PDF
                         </Button>
                         {selectedEvent.status !== "closed" ? (
-                          <Button type="button" variant="outline" onClick={handleCloseEvent}>
+                          <Button type="button" variant="outline" onClick={() => handleCloseEvent(selectedEvent)}>
                             <LogOut className="mr-2 h-4 w-4" />
-                            Close Event
+                            Deactivate Event
                           </Button>
                         ) : (
-                          <Button type="button" variant="outline" onClick={handleReopenEvent}>
+                          <Button type="button" variant="outline" onClick={() => handleReopenEvent(selectedEvent)}>
                             <PlayCircle className="mr-2 h-4 w-4" />
-                            Reopen Event
+                            Activate Event
                           </Button>
                         )}
                       </div>
@@ -2428,7 +2434,7 @@ function App() {
                               <TableCell>{formatDate(ev.eventDate)}</TableCell>
                               <TableCell>{ev.location}</TableCell>
                               <TableCell>
-                                <Badge variant="outline">{(ev.status || "active").toUpperCase()}</Badge>
+                                <Badge variant="outline">{eventStatusLabel(ev.status)}</Badge>
                               </TableCell>
                               <TableCell>{regCount}</TableCell>
                               <TableCell>
@@ -2451,6 +2457,15 @@ function App() {
                                   <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedEventId(ev.id); setActiveTab("reports"); }}>
                                     <FileText className="mr-1 h-3.5 w-3.5" /> Report
                                   </Button>
+                                  {ev.status === "closed" ? (
+                                    <Button type="button" variant="outline" size="sm" onClick={() => handleReopenEvent(ev)} title="Re-open this event so registrations / check-ins resume">
+                                      <PlayCircle className="mr-1 h-3.5 w-3.5" /> Activate
+                                    </Button>
+                                  ) : (
+                                    <Button type="button" variant="outline" size="sm" onClick={() => handleCloseEvent(ev)} title="Stop accepting new registrations / check-ins; finalize report">
+                                      <LogOut className="mr-1 h-3.5 w-3.5" /> Deactivate
+                                    </Button>
+                                  )}
                                   <Button type="button" variant="outline" size="sm" onClick={() => handleResetEventData(ev)} title="Wipe this event's registrations + check-ins + check-outs; keep the event">
                                     <RefreshCw className="mr-1 h-3.5 w-3.5" /> Reset Data
                                   </Button>
@@ -2484,7 +2499,7 @@ function App() {
                         <div className="summary-grid">
                           <div className="summary-item"><span>Client</span><strong>{selectedEvent.clientName}</strong></div>
                           <div className="summary-item"><span>Event Date</span><strong>{formatDate(selectedEvent.eventDate)}</strong></div>
-                          <div className="summary-item"><span>Status</span><strong>{(selectedEvent.status || "active").toUpperCase()}</strong></div>
+                          <div className="summary-item"><span>Status</span><strong>{eventStatusLabel(selectedEvent.status)}</strong></div>
                           <div className="summary-item"><span>Duplicate Rule</span><strong>{duplicateFieldLabels[selectedEvent.duplicateField]}</strong></div>
                         </div>
 
