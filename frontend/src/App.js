@@ -362,6 +362,28 @@ async function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 
+// DPDP Act 2023 notice: plain-language purpose/retention/rights, shown on public forms.
+// Grievance contact renders only when REACT_APP_GRIEVANCE_EMAIL is set at build time.
+function PrivacyNotice() {
+  const email = process.env.REACT_APP_GRIEVANCE_EMAIL;
+  return (
+    <details className="privacy-notice" style={{ textAlign: "left", marginTop: 8, fontSize: "0.78rem" }}>
+      <summary style={{ cursor: "pointer" }}>Privacy notice</summary>
+      <p>
+        We collect your name, ID, email, phone and (if you choose) photo consent only to run this event: registration, check-in and check-out, and event reporting. Check-in and check-out may also record your device location to confirm attendance.
+      </p>
+      <p>
+        Name, ID, email and phone are encrypted and visible only to authorised event administrators. Records are deleted after the event retention period set by the organiser (90 days by default). We do not sell your data or use it for advertising.
+      </p>
+      <p>
+        Under the Digital Personal Data Protection Act, 2023 you may ask to access, correct or erase your data, withdraw consent, or raise a grievance.
+        {email ? (<> Grievance Officer: <a href={`mailto:${email}`}>{email}</a>.</>) : " Contact the event organiser who shared this link."}
+      </p>
+      <p>This form is for adult participants. If you are under 18, do not submit it; a parent or guardian must contact the organiser instead.</p>
+    </details>
+  );
+}
+
 function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walkInOpen, setWalkInOpen, onWalkInConfirm }) {
   const [walkInName, setWalkInName] = useState("");
   return (
@@ -1751,6 +1773,7 @@ function App() {
 
           <div className="gform-footer">
             Never submit passwords through this form.
+            <PrivacyNotice />
           </div>
         </main>
 
@@ -2120,6 +2143,8 @@ function App() {
                         Capture this record for the selected event and retain it only for the event window.
                       </span>
                     </label>
+
+                    <PrivacyNotice />
 
                     <Button type="submit" className="cta-button" disabled={submitting || !selectedEvent}>
                       {submitting ? "Processing..." : "Submit Registration"}
